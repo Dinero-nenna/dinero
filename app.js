@@ -696,13 +696,14 @@
     document.getElementById("app-logout-btn").onclick = () => { if (window.doLogout) window.doLogout(); };
     document.getElementById("app-settings-link").onclick = () => openSettings();
 
+    let rolled = false;
     try {
       await ensureLibrary();
       await Promise.all([loadFeedback(), loadInventory()]);
       // Must run BEFORE loadWeekSlots(): it rotates week_key labels directly in the database
       // (denne/neste/neste2) when a real calendar week has passed, so the fetch right after
       // picks up the rotated labels rather than stale ones.
-      const rolled = await rollWeeksForwardIfNeeded();
+      rolled = await rollWeeksForwardIfNeeded();
       await loadWeekSlots();
       await ensureAllWeeksGenerated(); // fills in whatever the rotation just emptied out (or first-ever generation)
       await loadWeekSlots(); // re-fetch so freshly-generated rows (with real ids) are in state
