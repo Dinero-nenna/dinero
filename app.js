@@ -742,6 +742,7 @@
     if (state.household.matpakke_enabled) tabs.push({ id: "matpakke", label: "Matpakke" });
     tabs.push({ id: "handleliste", label: "Handleliste" });
     tabs.push({ id: "inventar", label: "Inventar" });
+    tabs.push({ id: "hjelp", label: "Hjelp" });
 
     if (!tabs.some((t) => t.id === state.activeTab)) state.activeTab = "middager";
 
@@ -764,6 +765,59 @@
     // instead of a friendly banner. runAsync() below is what prevents that.
     if (state.activeTab === "handleliste") return runAsync(() => renderHandleliste(main));
     if (state.activeTab === "inventar") return runAsync(() => renderInventar(main));
+    if (state.activeTab === "hjelp") return renderHjelp(main);
+  }
+
+  // ================================================================================
+  // HJELP
+  // ================================================================================
+
+  // Re-added 2026-08-31 ("Hjelp-fanen fra testversjonen har forsvunnet") — the prototype had
+  // one but it was deliberately left out of the first real-backend port. Rewritten (not just
+  // copied) to match how the app actually behaves now, and kept deliberately SHORT — she
+  // asked explicitly for "ikke for komplisert": only things that genuinely aren't obvious
+  // from just looking at the screen, one short paragraph each, no prototype-only caveats
+  // (e.g. the old "lagres kun mens siden er åpen" no longer applies — everything is real now).
+  function renderHjelp(main) {
+    const items = [
+      {
+        title: "Appen foreslår, du justerer",
+        body: "Middager og matpakker ligger klare når du åpner appen. Liker du ikke et forslag, trykk «Bytt ut» — enkelt som det.",
+      },
+      {
+        title: "👍 og 👎 lærer appen smaken din",
+        body: "Retter du liker dukker oftere opp igjen ved «Bytt ut». Retter du ikke liker dukker sjeldnere opp — men forsvinner aldri helt, så variasjonen består.",
+      },
+      {
+        title: "Endret du innstillinger? Trykk «Regenerer»",
+        body: "Å lagre nye innstillinger (allergier, preferanser, antall middager …) endrer ikke en uke som allerede er planlagt. «Regenerer middagene»/«Regenerer matpakkene» lager nye forslag for den uken basert på det du nettopp lagret.",
+      },
+      {
+        title: "GodtLevert-dagene dine holder seg faste",
+        body: "Dagene du har satt opp med GodtLevert blir alltid stående, uansett hvor mange middager du ellers har valgt å lage selv.",
+      },
+      {
+        title: "Handlelisten fylles automatisk — men bare fra middagene",
+        body: "Ingrediensene til ukas middager havner på listen av seg selv. Matpakke er annerledes: der må du selv trykke «Legg til» på det du faktisk trenger å kjøpe.",
+      },
+      {
+        title: "Avkrysning betyr «skal kjøpes», ikke «har kjøpt»",
+        body: "Varer du allerede har registrert under Inventar er derfor automatisk uavhuket og nedtonet. Du kan alltid overstyre selv.",
+      },
+      {
+        title: "Det du legger inn under Inventar påvirker forslagene også",
+        body: "Retter som bruker opp det dere har hjemme dukker litt oftere opp — bare et mildt dytt, ikke en fasit.",
+      },
+    ];
+    main.innerHTML = `
+      <div class="subhead">Slik fungerer Dinero</div>
+      <div class="hint">Du trenger ikke lese dette for å bruke appen — men noen av valgene under overflaten er ikke helt opplagte bare ved å se på skjermen.</div>
+      ${items.map((it) => `
+        <div class="help-item">
+          <h4>${esc(it.title)}</h4>
+          <p>${esc(it.body)}</p>
+        </div>`).join("")}
+    `;
   }
 
   // Wraps an async event handler so a rejected promise never becomes an uncaught error —
