@@ -114,7 +114,16 @@ const Dinero = (() => {
       };
     }
     async function run(url, opts) {
-      const res = await fetch(url, { ...opts, headers: headers(opts.headers) });
+      let res = await fetch(url, { ...opts, headers: headers(opts.headers) });
+      // Access tokens expire (Supabase default: 1 time). If the session sat unused past that —
+      // a tab left open, or simply coming back the next day — this refreshes it with the
+      // long-lived refresh_token and retries once, instead of surfacing a confusing auth error.
+      if (res.status === 401 && session && session.refresh_token) {
+        const refreshed = await refreshSession();
+        if (refreshed) {
+          res = await fetch(url, { ...opts, headers: headers(opts.headers) });
+        }
+      }
       if (res.status === 204) return null;
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error((data && (data.message || data.error)) || `Database-feil (${res.status})`);
