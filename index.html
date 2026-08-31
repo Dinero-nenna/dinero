@@ -229,6 +229,10 @@
   .help-item h4 { margin: 0 0 4px; font-family: var(--serif); font-weight: 700; font-size: 1rem; }
   .help-item p { margin: 0; font-size: 0.85rem; color: var(--ink-soft); line-height: 1.45; }
 
+  /* -- Oppskrifter tab: "Deres oppskrifter" list reuses .dish-card, stacked with hairlines -- */
+  .lib-list .dish-card { border-bottom: 1px solid var(--line); padding: 14px 0; margin: 0; }
+  .lib-list .dish-card:last-child { border-bottom: none; }
+
   table.matpakke {
     width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line);
     font-size: 0.88rem;

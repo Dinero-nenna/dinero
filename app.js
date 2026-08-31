@@ -205,6 +205,7 @@
     inventory: [],
     inventoryNames: [],  // lowercased inventory_items.item_name, cached for haveAtHome()
     openRecipes: new Set(),      // slot ids with an expanded "Vis oppskrift" box (session-only, not persisted)
+    openLibraryRecipes: new Set(), // dinner ids with an expanded "Vis oppskrift" box on the Oppskrifter tab (session-only)
     feedbackToggle: {},          // "kind:itemId" -> 'up'|'down', session-only button highlight (see report note)
     activeTab: "middager",
     activeWeek: "denne",         // which of WEEK_KEYS is being viewed — shared by Middager and Matpakke tabs
@@ -678,6 +679,7 @@
     state.household = household;
     state.uid = household.id;
     state.openRecipes = new Set();
+    state.openLibraryRecipes = new Set();
     state.feedbackToggle = {};
 
     container.innerHTML = `
@@ -808,6 +810,7 @@
   function renderTabs(container) {
     const tabs = [
       { id: "middager", label: "Middager" },
+      { id: "oppskrifter", label: "Oppskrifter" },
     ];
     if (state.household.matpakke_enabled) tabs.push({ id: "matpakke", label: "Matpakke" });
     tabs.push({ id: "handleliste", label: "Handleliste" });
@@ -828,6 +831,7 @@
     const main = document.getElementById("app-main");
     showBanner("app-banner", null);
     if (state.activeTab === "middager") return renderMiddager(main);
+    if (state.activeTab === "oppskrifter") return renderOppskrifter(main);
     if (state.activeTab === "matpakke") return renderMatpakke(main);
     // Handleliste and Inventar are async (they await a DB fetch before rendering) — their
     // returned promise is not awaited here (this function itself is a plain event handler
@@ -1062,6 +1066,156 @@
     await Dinero.db("week_plan_slots").update({ item_id: newId, updated_at: new Date().toISOString() }, { id: "eq." + slot.id });
     slot.item_id = newId;
     renderMiddager(document.getElementById("app-main"));
+  }
+
+  // ================================================================================
+  // OPPSKRIFTER — roadmap #1 ("Legg til egne oppskrifter", 2026-08-31): a self-serve form
+  // that inserts straight into the shared `dinners` library every household reads from.
+  // The database already allowed this ("dinners: insert own" RLS policy, created_by = auth.uid())
+  // — only the UI was missing, exactly as the roadmap said. Deliberately scoped to dinners only
+  // (matching the roadmap item's own wording), not matpakke/bake items.
+  // ================================================================================
+
+  // Turns a dish name into a URL/id-safe slug: lowercases, folds æøå, strips anything that
+  // isn't a-z/0-9 down to single hyphens. Always paired with a random suffix (below) since
+  // `dinners.id` is a single shared-table primary key — two households could otherwise pick
+  // the exact same slug for two different dishes (e.g. both naming something "Fiskegryte").
+  function slugifyName(name) {
+    const foldMap = { æ: "ae", ø: "o", å: "a", Æ: "Ae", Ø: "O", Å: "A" };
+    let s = String(name).replace(/[æøåÆØÅ]/g, (ch) => foldMap[ch] || ch).toLowerCase().trim();
+    s = s.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    return s || "oppskrift";
+  }
+
+  // Builds a new, collision-checked id for a `dinners` row (checked against the currently
+  // loaded library in state — a tiny residual race with another household inserting the exact
+  // same id in the same instant is possible but harmless: the DB's primary key just rejects it
+  // and the household sees a normal error, same as any other insert conflict).
+  function makeDinnerId(name) {
+    const base = slugifyName(name);
+    for (let i = 0; i < 5; i++) {
+      const candidate = `${base}-${Math.random().toString(36).slice(2, 7)}`;
+      if (!state.dinners[candidate]) return candidate;
+    }
+    return `${base}-${Date.now().toString(36)}`;
+  }
+
+  // Parses one free-typed ingredient line into the {a: amount, n: name} shape the rest of the
+  // app already expects (see fmtIngr(), the allergy filter, cuisine/preference matching).
+  // Heuristic, not a real parser: a leading number (optionally with a unit word) is taken as
+  // the amount, the rest is the name; a line with no leading number (e.g. "salt") gets amount "".
+  function parseIngredientLine(line) {
+    const trimmed = line.trim();
+    if (!trimmed) return null;
+    const m = trimmed.match(/^([\d.,]+\s*[a-zA-ZæøåÆØÅ]*)\s+(.+)$/);
+    if (m) return { a: m[1].trim(), n: m[2].trim() };
+    return { a: "", n: trimmed };
+  }
+
+  function libraryDishCardHtml(dish) {
+    const open = state.openLibraryRecipes.has(dish.id);
+    return `
+      <div class="dish-card">
+        <div class="card-title-row"><h3>${esc(dish.name)}</h3></div>
+        <div class="tags">
+          <span class="badge time">${dish.time_minutes} min</span>
+          <span class="badge">${esc(dish.cuisine)}</span>
+          ${dish.is_fish ? `<span class="badge fish">Fisk</span>` : ""}
+          ${dish.is_veg ? `<span class="badge veg">Vegetar</span>` : ""}
+        </div>
+        ${open ? `<div class="recipe-box">
+          <strong>Ingredienser</strong>
+          <div class="ingredients">${esc(fmtIngr(dish.ingredients))}</div>
+          <strong>Fremgangsmåte</strong>
+          ${(dish.steps && dish.steps.length) ? `<ol>${dish.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` : `<p>Ingen fremgangsmåte lagt inn.</p>`}
+        </div>` : ""}
+        <div class="row-actions">
+          <button data-lib-recipe="${esc(dish.id)}" class="recipe-btn ${open ? "open" : ""}">${open ? "Skjul oppskrift" : "Vis oppskrift"}</button>
+        </div>
+      </div>`;
+  }
+
+  function renderOppskrifter(main) {
+    const cuisineOptions = Array.from(new Set(Object.values(state.dinners).map((d) => d.cuisine).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, "no"))
+      .map((c) => `<option value="${esc(c)}"></option>`).join("");
+    const ownRecipes = Object.values(state.dinners)
+      .filter((d) => d.created_by === state.uid)
+      .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+
+    main.innerHTML = `
+      <div class="subhead">Legg til oppskrift</div>
+      <div class="hint">Oppskriften havner i det delte biblioteket alle husstander bruker — ikke bare deres.</div>
+      <div id="recipe-form-error"></div>
+      <label for="rec-name">Navn</label>
+      <input type="text" id="rec-name" placeholder="F.eks. Laksepasta med sitron">
+      <div class="field-row">
+        <div>
+          <label for="rec-time">Tid (minutter)</label>
+          <input type="number" id="rec-time" min="1" max="240" placeholder="30">
+        </div>
+        <div>
+          <label for="rec-cuisine">Kjøkken</label>
+          <input type="text" id="rec-cuisine" list="rec-cuisine-list" placeholder="F.eks. Italiensk">
+          <datalist id="rec-cuisine-list">${cuisineOptions}</datalist>
+        </div>
+      </div>
+      <div class="checkbox-row"><input type="checkbox" id="rec-fish"><label for="rec-fish" style="margin:0;">Fisk</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="rec-veg"><label for="rec-veg" style="margin:0;">Vegetar</label></div>
+      <label for="rec-ingredients">Ingredienser (én per linje)</label>
+      <textarea class="plain" id="rec-ingredients" placeholder="600 g laks&#10;2 dl rømme&#10;1 sitron"></textarea>
+      <div class="hint">Skriv mengde og navn per linje, f.eks. «600 g laks». Uten mengde holder det med bare navnet, f.eks. «salt».</div>
+      <label for="rec-steps">Fremgangsmåte (ett steg per linje)</label>
+      <textarea class="plain" id="rec-steps" placeholder="Kok pasta etter anvisning.&#10;Stek laksen i smør.&#10;Bland alt sammen."></textarea>
+      <button id="rec-submit">Legg til oppskrift</button>
+
+      <div class="subhead">Deres oppskrifter</div>
+      ${ownRecipes.length ? `<div class="lib-list" id="own-recipes"></div>` : `<div class="hint">Dere har ikke lagt til noen oppskrifter ennå.</div>`}
+    `;
+
+    if (ownRecipes.length) {
+      const listEl = document.getElementById("own-recipes");
+      listEl.innerHTML = ownRecipes.map((d) => libraryDishCardHtml(d)).join("");
+      listEl.querySelectorAll("[data-lib-recipe]").forEach((btn) => {
+        btn.onclick = () => {
+          const id = btn.dataset.libRecipe;
+          if (state.openLibraryRecipes.has(id)) state.openLibraryRecipes.delete(id); else state.openLibraryRecipes.add(id);
+          renderOppskrifter(main);
+        };
+      });
+    }
+
+    function showFormError(msg) {
+      const el = document.getElementById("recipe-form-error");
+      if (!el) return;
+      el.innerHTML = msg ? `<div class="banner-error">${esc(msg)}</div>` : "";
+    }
+
+    document.getElementById("rec-submit").onclick = guard(async () => {
+      showFormError("");
+      const name = document.getElementById("rec-name").value.trim();
+      const timeVal = Number(document.getElementById("rec-time").value);
+      const cuisine = document.getElementById("rec-cuisine").value.trim() || "Annet";
+      const isFish = document.getElementById("rec-fish").checked;
+      const isVeg = document.getElementById("rec-veg").checked;
+      const ingredientsRaw = document.getElementById("rec-ingredients").value;
+      const stepsRaw = document.getElementById("rec-steps").value;
+
+      if (!name) { showFormError("Skriv et navn på retten."); return; }
+      if (!timeVal || timeVal <= 0) { showFormError("Skriv hvor mange minutter retten tar."); return; }
+
+      const ingredients = ingredientsRaw.split("\n").map(parseIngredientLine).filter(Boolean);
+      const steps = stepsRaw.split("\n").map((s) => s.trim()).filter(Boolean);
+      const id = makeDinnerId(name);
+
+      const rows = await Dinero.db("dinners").insert([{
+        id, name, time_minutes: Math.round(timeVal), cuisine,
+        is_fish: isFish, is_veg: isVeg, ingredients, steps, created_by: state.uid,
+      }]);
+      const newDish = rows && rows[0];
+      if (newDish) state.dinners[newDish.id] = newDish;
+      renderOppskrifter(main);
+    });
   }
 
   // ================================================================================
