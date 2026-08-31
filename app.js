@@ -309,17 +309,55 @@
     await loadWeekSlots();
   }
 
-  function pickDistinct(pool, n, scoreMap, ingrLookup) {
+  // Same idea as regenerateDinnerWeek(), for matpakke/bakst (feature parity requested
+  // 2026-08-31: "samme funksjonalitet på matpakkene"). Deletes only that week's matpakke/bakst
+  // rows (never dinner/flex/godtlevert, which share the same week_key) and regenerates from
+  // current settings — allergies and matpakke_preferences now both feed the pick, see
+  // generateMatpakkePlanRows().
+  async function regenerateMatpakkeWeek(weekKey) {
+    const excludeIds = new Set(
+      state.weekSlots
+        .filter((s) => s.week_key !== weekKey && (s.slot_type === "matpakke" || s.slot_type === "bakst") && s.item_id)
+        .map((s) => s.item_id)
+    );
+    await Dinero.db("week_plan_slots").delete({
+      household_id: "eq." + state.uid,
+      week_key: "eq." + weekKey,
+      slot_type: "in.(matpakke,bakst)",
+    });
+    const { rows } = generateMatpakkePlanRows(weekKey, excludeIds);
+    await Dinero.db("week_plan_slots").upsert(rows, "household_id,week_key,day_label,slot_type");
+    await loadWeekSlots();
+  }
+
+  function pickDistinct(pool, n, scoreMap, ingrLookup, prefLookup) {
     const chosen = [];
     let remaining = pool.slice();
     for (let i = 0; i < n; i++) {
       if (!remaining.length) remaining = pool.slice(); // pool smaller than n — allow repeats rather than come up short
-      const id = weightedPick(remaining, scoreMap, ingrLookup);
+      const id = weightedPick(remaining, scoreMap, ingrLookup, prefLookup);
       if (id == null) break;
       chosen.push(id);
       remaining = remaining.filter((x) => x !== id);
     }
     return chosen;
+  }
+
+  // Generic version of cuisineMatchCount() for items that don't have a `cuisine` tag
+  // (matpakke_items/bake_items) — matches preference keywords against the item's own
+  // display name (`nameField`, e.g. "label" or "name") and its ingredient names. Used to
+  // give matpakke_preferences the same soft ~1.15x-per-match nudge that cuisine_preferences
+  // gives dinners (see weightedPick()'s cuisineLookup param — this fills that same role).
+  function textMatchCount(item, keywords, nameField) {
+    if (!item || !keywords || !keywords.length) return 0;
+    let count = 0;
+    const nameLower = (item[nameField] || "").toLowerCase();
+    const ingrNames = (item.ingredients || []).map((i) => (i.n || "").toLowerCase());
+    keywords.forEach((kw) => {
+      if (nameLower && (nameLower.includes(kw) || kw.includes(nameLower))) count++;
+      else if (ingrNames.some((n) => n.includes(kw))) count++;
+    });
+    return count;
   }
 
   function shuffled(arr) {
@@ -335,17 +373,32 @@
   // `excludeIds` (matpakke_items ids ∪ bake_items ids already used in OTHER already-generated
   // weeks) gets the same "prefer not already used elsewhere, fall back if the pool's too
   // small" treatment.
+  //
+  // FEATURE PARITY (2026-08-31, "samme funksjonalitet på matpakkene"): previously this ignored
+  // both allergies and matpakke_preferences entirely — a real gap, since a household could
+  // state an allergy and still get it suggested in a matpakke. Now mirrors generateDinnerPlanRows():
+  // a hard allergy filter (via filterAllergySafe(), falling back to the full pool only if the
+  // filter would leave nothing to choose from) plus a soft ~1.15x-per-match nudge from
+  // matpakke_preferences (via textMatchCount(), the cuisine_preferences equivalent for items
+  // that have no `cuisine` tag).
   function generateMatpakkePlanRows(weekKey, excludeIds) {
     const mpDays = ["Man", "Tir", "Tor", "Fre"]; // Ons is the bake day, matching the prototype
+    const keywords = allergyKeywords(state.household.allergies);
+    const prefKeywords = cuisineKeywords(state.household.matpakke_preferences);
+
     const mpFullPool = Object.keys(state.matpakke);
-    let mpPool = excludeIds && excludeIds.size ? mpFullPool.filter((id) => !excludeIds.has(id)) : mpFullPool;
-    if (mpPool.length < mpDays.length) mpPool = mpFullPool; // not enough left to fill every day distinctly — drop the cross-week exclusion
-    const mpIds = pickDistinct(mpPool, mpDays.length, {}, (i) => state.matpakke[i].ingredients);
+    const mpAllergySafe = filterAllergySafe(mpFullPool, state.matpakke, keywords);
+    let mpPool = excludeIds && excludeIds.size ? mpAllergySafe.filter((id) => !excludeIds.has(id)) : mpAllergySafe;
+    if (mpPool.length < mpDays.length) mpPool = mpAllergySafe; // not enough left to fill every day distinctly — drop the cross-week exclusion but keep allergy safety
+    if (mpPool.length < mpDays.length) mpPool = mpFullPool; // allergy filter alone left too few — never fully lock a household out (matches filterAllergySafe()'s own fallback philosophy)
+    const mpIds = pickDistinct(mpPool, mpDays.length, {}, (i) => state.matpakke[i].ingredients, (i) => textMatchCount(state.matpakke[i], prefKeywords, "label"));
 
     const bakeFullPool = Object.keys(state.bake);
-    let bakePool = excludeIds && excludeIds.size ? bakeFullPool.filter((id) => !excludeIds.has(id)) : bakeFullPool;
+    const bakeAllergySafe = filterAllergySafe(bakeFullPool, state.bake, keywords);
+    let bakePool = excludeIds && excludeIds.size ? bakeAllergySafe.filter((id) => !excludeIds.has(id)) : bakeAllergySafe;
+    if (!bakePool.length) bakePool = bakeAllergySafe;
     if (!bakePool.length) bakePool = bakeFullPool;
-    const bakeId = weightedPick(bakePool, {}, (i) => state.bake[i].ingredients);
+    const bakeId = weightedPick(bakePool, {}, (i) => state.bake[i].ingredients, (i) => textMatchCount(state.bake[i], prefKeywords, "name"));
 
     const sideIds = shuffled(Object.keys(state.sides));
     const rows = [];
@@ -418,16 +471,29 @@
     return weightedPick(pool, state.feedback.dinner, (id) => state.dinners[id].ingredients, (id) => cuisineMatchCount(state.dinners[id], cuisineKw));
   }
 
+  // FEATURE PARITY (2026-08-31): "Bytt ut" now respects allergies (hard filter) and
+  // matpakke_preferences (soft nudge), same as pickAlternativeDinner() above and
+  // generateMatpakkePlanRows() — previously a single manual swap could reintroduce an
+  // allergen even though the weekly regenerate now avoids it.
   function pickAlternativeMatpakke(currentId, weekKey) {
     const used = new Set(state.weekSlots.filter((s) => s.week_key === weekKey && s.slot_type === "matpakke" && s.item_id).map((s) => s.item_id));
-    let pool = Object.keys(state.matpakke).filter((id) => id !== currentId && !used.has(id));
-    if (!pool.length) pool = Object.keys(state.matpakke).filter((id) => id !== currentId);
-    return weightedPick(pool, state.feedback.matpakke, (id) => state.matpakke[id].ingredients);
+    const keywords = allergyKeywords(state.household.allergies);
+    const prefKeywords = cuisineKeywords(state.household.matpakke_preferences);
+    let base = Object.keys(state.matpakke).filter((id) => id !== currentId);
+    let pool = base.filter((id) => !used.has(id));
+    if (!pool.length) pool = base;
+    pool = filterAllergySafe(pool, state.matpakke, keywords);
+    if (!pool.length) pool = base.length ? base : Object.keys(state.matpakke).filter((id) => id !== currentId);
+    return weightedPick(pool, state.feedback.matpakke, (id) => state.matpakke[id].ingredients, (id) => textMatchCount(state.matpakke[id], prefKeywords, "label"));
   }
 
   function pickAlternativeBake(currentId) {
-    const pool = Object.keys(state.bake).filter((id) => id !== currentId);
-    return weightedPick(pool.length ? pool : Object.keys(state.bake), state.feedback.bakst, (id) => state.bake[id].ingredients);
+    const keywords = allergyKeywords(state.household.allergies);
+    const prefKeywords = cuisineKeywords(state.household.matpakke_preferences);
+    let pool = Object.keys(state.bake).filter((id) => id !== currentId);
+    pool = filterAllergySafe(pool, state.bake, keywords);
+    if (!pool.length) pool = Object.keys(state.bake).filter((id) => id !== currentId);
+    return weightedPick(pool.length ? pool : Object.keys(state.bake), state.feedback.bakst, (id) => state.bake[id].ingredients, (id) => textMatchCount(state.bake[id], prefKeywords, "name"));
   }
 
   // ---------- feedback (👍/👎) ----------
@@ -890,7 +956,10 @@
     main.innerHTML = `
       ${weekSwitcherHtml()}
       <div class="subhead">Matpakker (Man–Fre) — ${esc(WEEK_LABELS[weekKey])}</div>
-      <div class="hint">👍/👎 påvirker hvilke matpakker "Bytt ut" plukker oftere framover.</div>
+      <div class="hint">👍/👎 påvirker hvilke matpakker "Bytt ut" plukker oftere framover — og allergier/preferanser fra innstillingene dine påvirker alle forslagene.</div>
+      <div class="row-actions" style="margin-bottom:14px;">
+        <button class="small-btn" id="regen-mp-btn">Regenerer matpakkene for «${esc(WEEK_LABELS[weekKey])}»</button>
+      </div>
       <div style="overflow-x:auto;">
         <table class="matpakke">
           <thead><tr><th>Dag</th><th>Matpakke</th><th>Tilbehør</th><th>Handleliste</th></tr></thead>
@@ -898,6 +967,13 @@
         </table>
       </div>`;
     bindWeekSwitcher(main, () => renderMatpakke(main));
+    document.getElementById("regen-mp-btn").onclick = guard(async () => {
+      const label = WEEK_LABELS[weekKey];
+      const ok = confirm(`Dette bytter ut ALLE matpakker og bakst for "${label}" med nye forslag, og fjerner eventuelle manuelle bytter du har gjort for den uka. Fortsette?`);
+      if (!ok) return;
+      await regenerateMatpakkeWeek(weekKey);
+      renderMatpakke(main);
+    });
     const body = document.getElementById("mp-body");
     body.innerHTML = rows.map((r) => {
       const slot = slotFor(r.day, r.bake ? "bakst" : "matpakke", weekKey);
