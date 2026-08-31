@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dinero</title>
+<style>
+  :root {
+    --bg: #faf8f3;
+    --card: #ffffff;
+    --ink: #221f1b;
+    --ink-soft: #6d675d;
+    --line: #e2ddd0;
+    --accent: #6b2a26;
+    --accent-soft: #f4e9e7;
+    --godtlevert: #a3752f;
+    --flex: #4f6076;
+    --fish: #3f7ea6;
+    --veg: #4b7a3a;
+    --radius: 3px;
+    --serif: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+  }
+  header {
+    padding: 28px 20px 18px;
+    border-bottom: 1px solid var(--line);
+    text-align: center;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-style: italic;
+    color: var(--ink);
+    font-size: 2rem;
+    margin: 0;
+  }
+  .subtitle { color: var(--ink-soft); font-size: 0.9rem; margin-top: 4px; }
+
+  main { max-width: 420px; margin: 0 auto; padding: 40px 20px; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 28px 26px;
+  }
+  .card h2 {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 1.3rem;
+    margin: 0 0 18px;
+  }
+  label { display: block; font-size: 0.85rem; color: var(--ink-soft); margin: 14px 0 4px; }
+  input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    font-size: 0.95rem;
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--ink);
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  button {
+    width: 100%;
+    margin-top: 22px;
+    padding: 11px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 0.95rem;
+    font-family: var(--sans);
+    cursor: pointer;
+  }
+  button:hover { opacity: 0.92; }
+  button.secondary {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+  }
+  .toggle {
+    text-align: center;
+    margin-top: 18px;
+    font-size: 0.88rem;
+    color: var(--ink-soft);
+  }
+  .toggle a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+  #authView .card { max-width: 380px; margin: 0 auto; }
+  #authView .toggle { max-width: 380px; margin: 18px auto 0; }
+  .error {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    font-size: 0.85rem;
+    margin-top: 14px;
+    display: none;
+  }
+  .hint { font-size: 0.8rem; color: var(--ink-soft); margin-top: 6px; line-height: 1.4; }
+
+  #appView { display: none; }
+
+  /* ===========================================================================
+     App shell + onboarding — ported visual language from the prototype
+     (matplaner_prototype.html): editorial serif headlines, hairline borders,
+     no drop shadows, --accent for emphasis. Kept in this same <style> block so
+     app.js (which only injects markup, not CSS) has a single stylesheet to rely on.
+     =========================================================================== */
+
+  main { max-width: 760px; }
+
+  /* -- top bar: household name + settings/logout, shown above the tab nav -- */
+  .app-topbar {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 14px;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+  }
+  .app-topbar .household-name { font-family: var(--serif); font-style: italic; font-size: 1.3rem; }
+  .app-topbar-actions { display: flex; gap: 14px; align-items: center; font-size: 0.85rem; }
+  .app-topbar-actions a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+  .app-topbar-actions button {
+    width: auto; margin: 0; padding: 6px 12px; font-size: 0.8rem;
+    background: transparent; color: var(--ink-soft); border: 1px solid var(--line);
+  }
+
+  /* -- tab nav (ported 1:1 from the prototype) -- */
+  nav.tabs {
+    display: flex;
+    gap: 22px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 20px;
+  }
+  nav.tabs button {
+    width: auto;
+    border: none;
+    background: none;
+    color: var(--ink-soft);
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    padding: 13px 0;
+    margin: 0;
+    cursor: pointer;
+    white-space: nowrap;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  nav.tabs button.active { color: var(--ink); border-bottom: 2px solid var(--accent); }
+
+  .day-row { display: flex; gap: 14px; align-items: stretch; border-bottom: 1px solid var(--line); }
+  .day-row:first-of-type { border-top: 1px solid var(--line); }
+  .day-label {
+    width: 40px; flex-shrink: 0; font-family: var(--serif); font-style: italic;
+    font-size: 0.85rem; color: var(--ink-soft); padding-top: 16px; text-align: right;
+  }
+  .dish-card { flex: 1; background: var(--card); padding: 14px 0 16px; }
+  .dish-card.godtlevert { border-left: 3px solid var(--godtlevert); padding-left: 12px; }
+  .dish-card.flex { border-left: 3px solid var(--flex); padding-left: 12px; }
+  .card-title-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .dish-card h3 { margin: 0; font-family: var(--serif); font-weight: 700; font-size: 1.12rem; }
+  .badge {
+    font-size: 0.7rem; color: var(--accent); font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; white-space: nowrap;
+  }
+  .badge.time { color: var(--ink-soft); font-weight: 600; }
+  .badge.fish { color: var(--fish); font-style: italic; font-weight: 600; text-transform: none; letter-spacing: 0; }
+  .badge.veg { color: var(--veg); font-style: italic; font-weight: 600; text-transform: none; letter-spacing: 0; }
+  .tags { margin-top: 5px; display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+  .tags .badge:not(:first-child)::before { content: "· "; color: var(--line); font-weight: 400; }
+  .ingredients { margin-top: 8px; font-size: 0.82rem; color: var(--ink-soft); }
+  .recipe-box { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 0.85rem; }
+  .recipe-box ol { margin: 4px 0 0; padding-left: 18px; }
+  .recipe-box li { margin-bottom: 4px; }
+  .recipe-box strong { display: block; margin-top: 10px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--ink-soft); }
+  .recipe-box strong:first-child { margin-top: 0; }
+  .row-actions { margin-top: 10px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .row-actions button, .small-btn {
+    width: auto; border: 1px solid var(--line); background: var(--card); font-family: var(--sans);
+    border-radius: var(--radius); padding: 5px 10px; font-size: 0.78rem; cursor: pointer;
+    color: var(--ink); margin: 0;
+  }
+  .row-actions button.active-fb, .small-btn.active-fb { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .row-actions button.recipe-btn.open { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .godtlevert-tag { color: var(--godtlevert); font-weight: 600; font-style: italic; }
+  .flex-tag { color: var(--flex); font-weight: 600; font-style: italic; }
+  /* -- "Denne uken / Neste uke / Uken etter" segmented control (Middager + Matpakke tabs) -- */
+  .week-switcher {
+    display: flex; gap: 0; margin-bottom: 16px; border: 1px solid var(--line);
+    border-radius: var(--radius); overflow: hidden; width: fit-content;
+  }
+  .week-switcher button {
+    width: auto; margin: 0; padding: 8px 14px; border: none; border-right: 1px solid var(--line);
+    background: var(--card); color: var(--ink-soft); font-family: var(--sans); font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .week-switcher button:last-child { border-right: none; }
+  .week-switcher button.active { background: var(--accent); color: #fff; }
+
+  .subhead {
+    font-family: var(--serif); font-style: italic; font-size: 1.15rem; font-weight: 400;
+    margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
+  }
+  .hint { font-size: 0.8rem; color: var(--ink-soft); margin: 4px 0 12px; line-height: 1.4; }
+  .banner-error {
+    background: var(--accent-soft); color: var(--accent); border-radius: var(--radius);
+    padding: 10px 12px; font-size: 0.85rem; margin: 0 0 14px;
+  }
+
+  table.matpakke {
+    width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line);
+    font-size: 0.88rem;
+  }
+  table.matpakke th, table.matpakke td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  table.matpakke th { background: var(--bg); font-size: 0.72rem; color: var(--ink-soft); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+  table.matpakke tr:last-child td { border-bottom: none; }
+  table.matpakke .bake-cell { display: flex; align-items: center; gap: 8px; justify-content: space-between; flex-wrap: wrap; }
+
+  .add-item-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .add-item-row input[type=text] {
+    flex: 1; padding: 9px 12px; border-radius: var(--radius); border: 1px solid var(--line);
+    font-size: 0.9rem; background: var(--card); width: auto;
+  }
+  .add-item-row button {
+    width: auto; margin: 0; padding: 9px 16px; border-radius: var(--radius); border: 1px solid var(--ink);
+    background: var(--ink); color: #fff; font-family: var(--sans); font-size: 0.9rem; cursor: pointer;
+  }
+  ul.shoplist { list-style: none; margin: 0 0 20px; padding: 0; }
+  ul.shoplist li {
+    border-bottom: 1px solid var(--line); padding: 10px 2px; display: flex; align-items: center;
+    gap: 10px; font-size: 0.9rem;
+  }
+  ul.shoplist li.have { opacity: 0.5; }
+  ul.shoplist li input[type=checkbox] { accent-color: var(--accent); width: 17px; height: 17px; }
+  ul.shoplist li span.have-tag { margin-left: auto; font-size: 0.7rem; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; }
+  ul.shoplist li button.remove { margin-left: auto; width: auto; border: none; background: none; color: var(--ink-soft); font-size: 1rem; cursor: pointer; line-height: 1; padding: 0; }
+
+  .inv-group { margin-bottom: 18px; }
+  .inv-group h4 { margin: 0 0 8px; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); }
+  .inv-items { display: flex; flex-wrap: wrap; gap: 8px; }
+  .inv-chip {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 6px 8px 6px 12px; font-size: 0.82rem; display: flex; align-items: center; gap: 8px;
+  }
+  .inv-chip button { width: auto; margin: 0; border: none; background: none; color: var(--ink-soft); font-size: 0.9rem; cursor: pointer; padding: 0; }
+  .inv-empty { font-style: italic; color: var(--ink-soft); font-size: 0.9rem; padding: 4px 0 18px; }
+  .inv-add-row { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .inv-add-row input, .inv-add-row select { width: auto; flex: 1; min-width: 140px; }
+  .inv-add-row button { width: auto; margin: 0; padding: 9px 16px; }
+
+  /* -- onboarding form: reuses the auth .card/label/input styling -- */
+  #onboardingView { display: none; }
+  #onboardingView .card { max-width: 520px; margin: 0 auto; text-align: left; }
+  #onboardingView .card h2 { text-align: left; }
+  .field-row { display: flex; gap: 10px; }
+  .field-row > div { flex: 1; }
+  .child-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 8px; }
+  .child-row input { width: auto; flex: 1; }
+  .child-row button, .add-link-btn {
+    width: auto; margin: 0; padding: 9px 12px; background: transparent; color: var(--ink-soft);
+    border: 1px solid var(--line); font-size: 0.85rem; white-space: nowrap;
+  }
+  .add-link-btn { color: var(--accent); border-color: var(--accent); margin-top: 6px; }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; }
+  .checkbox-row input { width: auto; margin: 0; }
+  .checkbox-row label { margin: 0; }
+  .day-picker { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 4px; }
+  .day-picker label {
+    display: flex; align-items: center; gap: 5px; margin: 0; padding: 6px 10px; border: 1px solid var(--line);
+    border-radius: var(--radius); font-size: 0.82rem; cursor: pointer; color: var(--ink);
+  }
+  .day-picker input { width: auto; margin: 0; }
+  textarea.plain {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius);
+    font-size: 0.92rem; font-family: var(--sans); background: var(--bg); color: var(--ink); resize: vertical; min-height: 60px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Dinero</h1>
+  <div class="subtitle">Familiens middagsplanlegger</div>
+</header>
+
+<main>
+
+  <!-- AUTH VIEW -->
+  <div id="authView">
+    <div class="card">
+      <h2 id="authTitle">Logg inn</h2>
+      <div id="signupExtra" style="display:none;">
+        <label for="householdName">Navn på husstanden</label>
+        <input id="householdName" type="text" placeholder="F.eks. «Familien Bårdstu»" autocomplete="organization">
+      </div>
+      <label for="email">E-post</label>
+      <input id="email" type="email" autocomplete="username" placeholder="du@epost.no">
+      <label for="password">Passord</label>
+      <input id="password" type="password" autocomplete="current-password">
+      <div class="hint" id="signupHint" style="display:none;">Én innlogging deles av hele husstanden — ikke separate kontoer per familiemedlem.</div>
+      <button id="submitBtn">Logg inn</button>
+      <div class="error" id="authError"></div>
+    </div>
+    <div class="toggle" id="toggleText">
+      Ny husstand? <a id="toggleLink">Opprett konto</a>
+    </div>
+  </div>
+
+  <!-- ONBOARDING VIEW — "tilpass matpreferanser", rendered by app.js -->
+  <div id="onboardingView"></div>
+
+  <!-- MAIN APP VIEW (Middager/Matpakke/Handleliste/Inventar) — rendered by app.js -->
+  <div id="appView"></div>
+
+</main>
+
+<script src="config.js"></script>
+<script src="supabase-lite.js"></script>
+<script src="app.js"></script>
+<script>
+  Dinero.configure(window.DINERO_CONFIG.SUPABASE_URL, window.DINERO_CONFIG.SUPABASE_ANON_KEY);
+
+  let mode = "login"; // or "signup"
+
+  const $ = (id) => document.getElementById(id);
+
+  function showError(msg) {
+    const el = $("authError");
+    el.textContent = msg;
+    el.style.display = "block";
+  }
+  function clearError() {
+    $("authError").style.display = "none";
+  }
+
+  function renderAuthMode() {
+    if (mode === "signup") {
+      $("authTitle").textContent = "Opprett konto";
+      $("submitBtn").textContent = "Opprett konto";
+      $("signupExtra").style.display = "block";
+      $("signupHint").style.display = "block";
+      $("password").autocomplete = "new-password";
+      $("toggleText").innerHTML = 'Har dere allerede en konto? <a id="toggleLink">Logg inn</a>';
+    } else {
+      $("authTitle").textContent = "Logg inn";
+      $("submitBtn").textContent = "Logg inn";
+      $("signupExtra").style.display = "none";
+      $("signupHint").style.display = "none";
+      $("password").autocomplete = "current-password";
+      $("toggleText").innerHTML = 'Ny husstand? <a id="toggleLink">Opprett konto</a>';
+    }
+    // Re-bind the toggle link since innerHTML replaced the element.
+    $("toggleLink").addEventListener("click", () => {
+      mode = mode === "login" ? "signup" : "login";
+      clearError();
+      renderAuthMode();
+    });
+  }
+  renderAuthMode();
+
+  $("submitBtn").addEventListener("click", async () => {
+    clearError();
+    const email = $("email").value.trim();
+    const password = $("password").value;
+    if (!email || !password) { showError("Fyll ut e-post og passord."); return; }
+    $("submitBtn").disabled = true;
+    try {
+      if (mode === "signup") {
+        const householdName = $("householdName").value.trim() || "Min husstand";
+        await Dinero.signUp(email, password, householdName);
+      } else {
+        await Dinero.signIn(email, password);
+      }
+      await enterApp();
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      $("submitBtn").disabled = false;
+    }
+  });
+
+  // Both the onboarding form and the main app shell call this to log out —
+  // exposed globally so app.js (which renders their markup) can wire it up too.
+  async function doLogout() {
+    await Dinero.signOut();
+    location.reload();
+  }
+  window.doLogout = doLogout;
+
+  function hideAllViews() {
+    $("authView").style.display = "none";
+    $("onboardingView").style.display = "none";
+    $("appView").style.display = "none";
+  }
+
+  // Fetches the full household row (not just the name) and hands off to app.js:
+  // onboarding if it hasn't been completed yet, otherwise the real app. Retries
+  // the household fetch once after a short delay, since on first signup the
+  // row-creation trigger can briefly lag behind the auth response.
+  async function enterApp(attempt) {
+    const user = Dinero.currentUser();
+    if (!user) return;
+    let household = null;
+    try {
+      const rows = await Dinero.db("households").select("*", { id: `eq.${user.id}` });
+      household = rows && rows[0];
+    } catch (e) {
+      // fall through to retry/error handling below
+    }
+    if (!household) {
+      if (!attempt) {
+        setTimeout(() => enterApp(1), 900);
+        return;
+      }
+      showError("Fikk ikke hentet husstanden din. Prøv å laste siden på nytt om et øyeblikk.");
+      return;
+    }
+    hideAllViews();
+    // DineroApp.showApp() is async (it awaits DB fetches before rendering); it handles its
+    // own load errors internally, but the .catch() here is a last-resort net so a rejection
+    // can never surface as an uncaught promise rejection no matter where it originates.
+    const runShowApp = (household) => DineroApp.showApp($("appView"), household).catch((e) => {
+      console.error(e);
+      showError(e && e.message ? e.message : "Fikk ikke lastet appen. Prøv å laste siden på nytt.");
+    });
+    if (!household.onboarding_completed) {
+      $("onboardingView").style.display = "block";
+      DineroApp.showOnboarding($("onboardingView"), household, {
+        firstTime: true,
+        onDone: (updatedHousehold) => {
+          $("onboardingView").style.display = "none";
+          $("appView").style.display = "block";
+          runShowApp(updatedHousehold);
+        },
+      });
+    } else {
+      $("appView").style.display = "block";
+      runShowApp(household);
+    }
+  }
+
+  // If a session is already stored, skip straight to the app.
+  if (Dinero.currentUser()) enterApp();
+</script>
+
+</body>
+</html>
