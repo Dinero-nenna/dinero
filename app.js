@@ -205,9 +205,10 @@
     inventory: [],
     inventoryNames: [],  // lowercased inventory_items.item_name, cached for haveAtHome()
     openRecipes: new Set(),      // slot ids with an expanded "Vis oppskrift" box (session-only, not persisted)
-    openLibraryRecipes: new Set(), // dinner ids with an expanded "Vis oppskrift" box on the Oppskrifter tab (session-only)
+    openLibraryRecipes: new Set(), // dinner ids with an expanded "Vis oppskrift" box in the "Deres oppskrifter" list under Middager (session-only)
     feedbackToggle: {},          // "kind:itemId" -> 'up'|'down', session-only button highlight (see report note)
     activeTab: "middager",
+    showRecipeForm: false,       // whether the "Legg til oppskrift" form is expanded under Middager (session-only)
     activeWeek: "denne",         // which of WEEK_KEYS is being viewed — shared by Middager and Matpakke tabs
   };
   let libraryLoaded = false;
@@ -681,6 +682,7 @@
     state.openRecipes = new Set();
     state.openLibraryRecipes = new Set();
     state.feedbackToggle = {};
+    state.showRecipeForm = false;
 
     container.innerHTML = `
       <div class="app-topbar">
@@ -810,7 +812,6 @@
   function renderTabs(container) {
     const tabs = [
       { id: "middager", label: "Middager" },
-      { id: "oppskrifter", label: "Oppskrifter" },
     ];
     if (state.household.matpakke_enabled) tabs.push({ id: "matpakke", label: "Matpakke" });
     tabs.push({ id: "handleliste", label: "Handleliste" });
@@ -831,7 +832,6 @@
     const main = document.getElementById("app-main");
     showBanner("app-banner", null);
     if (state.activeTab === "middager") return renderMiddager(main);
-    if (state.activeTab === "oppskrifter") return renderOppskrifter(main);
     if (state.activeTab === "matpakke") return renderMatpakke(main);
     // Handleliste and Inventar are async (they await a DB fetch before rendering) — their
     // returned promise is not awaited here (this function itself is a plain event handler
@@ -986,7 +986,9 @@
       <div class="hint">👍/👎 og det du har hjemme påvirker hvilke retter "Bytt ut" plukker oftere framover — ikke bare her og nå.</div>
       <div class="row-actions" style="margin-bottom:14px;">
         <button class="small-btn" id="regen-week-btn">Regenerer middagene for «${esc(WEEK_LABELS[weekKey])}»</button>
+        <button class="small-btn" id="recipe-toggle-btn">${state.showRecipeForm ? "Skjul oppskrift-skjema" : "+ Legg til oppskrift"}</button>
       </div>
+      ${state.showRecipeForm ? recipeFormSectionHtml() : ""}
       <div id="day-list"></div>
     `;
     bindWeekSwitcher(main, () => renderMiddager(main));
@@ -997,6 +999,11 @@
       await regenerateDinnerWeek(weekKey);
       renderMiddager(main);
     });
+    document.getElementById("recipe-toggle-btn").onclick = () => {
+      state.showRecipeForm = !state.showRecipeForm;
+      renderMiddager(main);
+    };
+    if (state.showRecipeForm) bindRecipeFormHandlers(main);
     const dayList = document.getElementById("day-list");
     dayList.innerHTML = dinnerAndFlexSlots.map((slot) => {
       if (slot.slot_type === "godtlevert") {
@@ -1069,11 +1076,14 @@
   }
 
   // ================================================================================
-  // OPPSKRIFTER — roadmap #1 ("Legg til egne oppskrifter", 2026-08-31): a self-serve form
-  // that inserts straight into the shared `dinners` library every household reads from.
-  // The database already allowed this ("dinners: insert own" RLS policy, created_by = auth.uid())
-  // — only the UI was missing, exactly as the roadmap said. Deliberately scoped to dinners only
-  // (matching the roadmap item's own wording), not matpakke/bake items.
+  // OPPSKRIFTER — roadmap #1 ("Legg til egne oppskrifter", 2026-08-31): a self-serve form,
+  // embedded as a toggleable section inside Middager (not its own tab) rather than inserting
+  // into a database every household reads from — a recipe added here is private to the
+  // household that added it. The `dinners` table's SELECT policy restricts what a household
+  // can read to seed dishes (created_by is null) plus rows it created itself (see
+  // migration_005_oppskrifter_lokalt.sql), so this is enforced at the database level, not just
+  // hidden in the UI. Deliberately scoped to dinners only (matching the roadmap item's own
+  // wording), not matpakke/bake items.
   // ================================================================================
 
   // Turns a dish name into a URL/id-safe slug: lowercases, folds æøå, strips anything that
@@ -1135,7 +1145,11 @@
       </div>`;
   }
 
-  function renderOppskrifter(main) {
+  // Builds the "Legg til oppskrift" form + "Deres oppskrifter" list as an HTML string, meant to
+  // be spliced into Middager's own main.innerHTML template (see renderMiddager above) — not a
+  // separate tab/render target. bindRecipeFormHandlers() below wires up its interactive bits
+  // once that combined HTML is in the DOM.
+  function recipeFormSectionHtml() {
     const cuisineOptions = Array.from(new Set(Object.values(state.dinners).map((d) => d.cuisine).filter(Boolean)))
       .sort((a, b) => a.localeCompare(b, "no"))
       .map((c) => `<option value="${esc(c)}"></option>`).join("");
@@ -1143,9 +1157,9 @@
       .filter((d) => d.created_by === state.uid)
       .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
 
-    main.innerHTML = `
+    return `
       <div class="subhead">Legg til oppskrift</div>
-      <div class="hint">Oppskriften havner i det delte biblioteket alle husstander bruker — ikke bare deres.</div>
+      <div class="hint">Oppskriften blir lagt til lokalt hos dere — ikke delt med andre husstander.</div>
       <div id="recipe-form-error"></div>
       <label for="rec-name">Navn</label>
       <input type="text" id="rec-name" placeholder="F.eks. Laksepasta med sitron">
@@ -1170,25 +1184,29 @@
       <button id="rec-submit">Legg til oppskrift</button>
 
       <div class="subhead">Deres oppskrifter</div>
-      ${ownRecipes.length ? `<div class="lib-list" id="own-recipes"></div>` : `<div class="hint">Dere har ikke lagt til noen oppskrifter ennå.</div>`}
+      ${ownRecipes.length ? `<div class="lib-list" id="own-recipes">${ownRecipes.map((d) => libraryDishCardHtml(d)).join("")}</div>` : `<div class="hint">Dere har ikke lagt til noen oppskrifter ennå.</div>`}
     `;
+  }
 
-    if (ownRecipes.length) {
-      const listEl = document.getElementById("own-recipes");
-      listEl.innerHTML = ownRecipes.map((d) => libraryDishCardHtml(d)).join("");
-      listEl.querySelectorAll("[data-lib-recipe]").forEach((btn) => {
-        btn.onclick = () => {
-          const id = btn.dataset.libRecipe;
-          if (state.openLibraryRecipes.has(id)) state.openLibraryRecipes.delete(id); else state.openLibraryRecipes.add(id);
-          renderOppskrifter(main);
-        };
-      });
-    }
-
+  // Wires up the form + list rendered by recipeFormSectionHtml() above, once it's in the DOM as
+  // part of Middager. Called from renderMiddager() right after setting main.innerHTML, only when
+  // state.showRecipeForm is true (i.e. only when that markup actually exists to bind to).
+  function bindRecipeFormHandlers(main) {
     function showFormError(msg) {
       const el = document.getElementById("recipe-form-error");
       if (!el) return;
       el.innerHTML = msg ? `<div class="banner-error">${esc(msg)}</div>` : "";
+    }
+
+    const ownListEl = document.getElementById("own-recipes");
+    if (ownListEl) {
+      ownListEl.querySelectorAll("[data-lib-recipe]").forEach((btn) => {
+        btn.onclick = () => {
+          const id = btn.dataset.libRecipe;
+          if (state.openLibraryRecipes.has(id)) state.openLibraryRecipes.delete(id); else state.openLibraryRecipes.add(id);
+          renderMiddager(main);
+        };
+      });
     }
 
     document.getElementById("rec-submit").onclick = guard(async () => {
@@ -1214,7 +1232,7 @@
       }]);
       const newDish = rows && rows[0];
       if (newDish) state.dinners[newDish.id] = newDish;
-      renderOppskrifter(main);
+      renderMiddager(main);
     });
   }
 
