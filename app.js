@@ -698,8 +698,13 @@
 
     try {
       await ensureLibrary();
-      await Promise.all([loadFeedback(), loadInventory(), loadWeekSlots()]);
-      await ensureAllWeeksGenerated();
+      await Promise.all([loadFeedback(), loadInventory()]);
+      // Must run BEFORE loadWeekSlots(): it rotates week_key labels directly in the database
+      // (denne/neste/neste2) when a real calendar week has passed, so the fetch right after
+      // picks up the rotated labels rather than stale ones.
+      const rolled = await rollWeeksForwardIfNeeded();
+      await loadWeekSlots();
+      await ensureAllWeeksGenerated(); // fills in whatever the rotation just emptied out (or first-ever generation)
       await loadWeekSlots(); // re-fetch so freshly-generated rows (with real ids) are in state
     } catch (e) {
       showBanner("app-banner", "Fikk ikke lastet ukeplanen: " + errMsg(e));
@@ -707,7 +712,71 @@
       return;
     }
 
+    if (rolled) {
+      showBanner("app-banner", "Ny uke! «Denne uken» er oppdatert til inneværende uke, og nye forslag er klare lenger fram.");
+    }
     renderTabs(container);
+  }
+
+  // ---------- calendar week rollover ----------
+
+  // Monday (00:00 local time) of the ISO week containing `d`.
+  function mondayOfWeek(d) {
+    const date = new Date(d);
+    date.setHours(0, 0, 0, 0);
+    const day = date.getDay(); // 0=søn .. 6=lør
+    const diff = day === 0 ? -6 : 1 - day; // days to walk back to Monday
+    date.setDate(date.getDate() + diff);
+    return date;
+  }
+
+  function isoDateString(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  // Rotates week_key labels forward by one real calendar week: the now-past "denne" is
+  // discarded, "neste" becomes "denne", "uken etter" becomes "neste" — leaving a fresh, empty
+  // "uken etter" for ensureAllWeeksGenerated() to fill in afterwards (reusing its existing
+  // "generate whatever week_key currently has zero rows" logic, so no new generation code is
+  // needed here). Order matters: denne must be cleared out before neste is renamed into it,
+  // and neste must be cleared out (by the rename above) before neste2 is renamed into it — the
+  // (household_id, week_key, day_label, slot_type) uniqueness constraint would otherwise
+  // collide with rows still sitting under the target label.
+  async function rotateWeeksOnce() {
+    await Dinero.db("week_plan_slots").delete({ household_id: "eq." + state.uid, week_key: "eq.denne" });
+    await Dinero.db("week_plan_slots").update({ week_key: "denne" }, { household_id: "eq." + state.uid, week_key: "eq.neste" });
+    await Dinero.db("week_plan_slots").update({ week_key: "neste" }, { household_id: "eq." + state.uid, week_key: "eq.neste2" });
+  }
+
+  // Checks whether a real calendar week has passed since the household's stored week_anchor
+  // (the Monday that "denne uken" currently represents), and rotates the three week buckets
+  // forward that many times if so — so "denne uken" always means the household's actual
+  // current week, without ever recomputing an already-viewed week's contents mid-week.
+  // Returns true if a rotation happened (so the caller can show a one-time "ny uke" banner).
+  async function rollWeeksForwardIfNeeded() {
+    const todayMonday = isoDateString(mondayOfWeek(new Date()));
+    const anchor = state.household.week_anchor;
+    if (!anchor) {
+      // First time this household is seen under this feature (existing household from before
+      // it shipped, or a brand new signup mid-onboarding) — establish the baseline as
+      // "right now", deliberately WITHOUT rotating anything, so nobody's current "denne uken"
+      // plan changes out from under them the moment this ships.
+      await Dinero.db("households").update({ week_anchor: todayMonday }, { id: "eq." + state.uid });
+      state.household.week_anchor = todayMonday;
+      return false;
+    }
+    const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+    const diffWeeks = Math.floor((new Date(todayMonday) - new Date(anchor)) / msPerWeek);
+    if (diffWeeks < 1) return false; // still the same real week — nothing to do
+    for (let i = 0; i < diffWeeks; i++) {
+      await rotateWeeksOnce();
+    }
+    await Dinero.db("households").update({ week_anchor: todayMonday }, { id: "eq." + state.uid });
+    state.household.week_anchor = todayMonday;
+    return true;
   }
 
   // Reopens the onboarding form pre-filled with current values, in the DEDICATED
