@@ -102,6 +102,14 @@
 
   function itemMatchesAllergy(item, keywords) {
     if (!keywords.length) return false;
+    // Sides have no `ingredients` array (schema: sides(id, amount, item_name)) — a flat name
+    // field instead, unlike dinners/matpakke_items/bake_items. Check that directly so
+    // filterAllergySafe() works unmodified on the sides pool too (2026-09-01, "tilbehør
+    // filtreres ikke på allergi" fix).
+    if (item.item_name) {
+      const name = item.item_name.toLowerCase();
+      return keywords.some((kw) => name.includes(kw) || kw.includes(name));
+    }
     const names = (item.ingredients || []).map((i) => (i.n || "").toLowerCase());
     return keywords.some((kw) => names.some((n) => n.includes(kw) || kw.includes(n)));
   }
@@ -402,7 +410,9 @@
     if (!bakePool.length) bakePool = bakeFullPool;
     const bakeId = weightedPick(bakePool, {}, (i) => state.bake[i].ingredients, (i) => textMatchCount(state.bake[i], prefKeywords, "name"));
 
-    const sideIds = shuffled(Object.keys(state.sides));
+    const sideFullPool = Object.keys(state.sides);
+    const sideAllergySafe = filterAllergySafe(sideFullPool, state.sides, keywords);
+    const sideIds = shuffled(sideAllergySafe);
     const rows = [];
     const chosen = mpIds.slice();
     mpDays.forEach((day, i) => {
