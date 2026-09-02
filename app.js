@@ -92,12 +92,58 @@
   }
 
   // ---------- allergier: enkel nøkkelord-matching mot ingrediensnavn (ikke en allergen-ontologi) ----------
+
+  // FIX (roadmap #9, 2026-09-02): plain substring matching alone missed obvious word-forms —
+  // e.g. "peanøtter" does NOT substring-match "peanøttsmør" (different suffix: peanøtt-ER vs.
+  // peanøtt-SMØR), even though anyone with a peanut allergy needs peanøttsmør caught too. A
+  // small curated synonym/derivative list per common allergen, keyed by a normalized root —
+  // NOT a real allergen ontology (still the app's documented v1/v2 simplification), just the
+  // handful of cases a household is actually likely to type. Whichever raw keyword the
+  // household typed gets ALL of a matching entry's variants added alongside it (see
+  // expandAllergyKeywords() below), so itemMatchesAllergy()'s existing bidirectional substring
+  // check (unchanged) now also catches these derived forms.
+  const ALLERGY_SYNONYMS = {
+    "peanøtt": ["peanøtt", "peanøtter", "peanøttsmør", "peanøttolje", "jordnøtt", "jordnøtter"],
+    "peanøtter": ["peanøtt", "peanøtter", "peanøttsmør", "peanøttolje", "jordnøtt", "jordnøtter"],
+    "jordnøtt": ["peanøtt", "peanøtter", "peanøttsmør", "peanøttolje", "jordnøtt", "jordnøtter"],
+    "jordnøtter": ["peanøtt", "peanøtter", "peanøttsmør", "peanøttolje", "jordnøtt", "jordnøtter"],
+    "nøtt": ["nøtt", "nøtter", "mandel", "mandler", "hasselnøtt", "hasselnøtter", "valnøtt", "valnøtter", "cashewnøtt", "cashewnøtter", "pistasj", "pistasjnøtt", "peanøtt", "peanøtter"],
+    "nøtter": ["nøtt", "nøtter", "mandel", "mandler", "hasselnøtt", "hasselnøtter", "valnøtt", "valnøtter", "cashewnøtt", "cashewnøtter", "pistasj", "pistasjnøtt", "peanøtt", "peanøtter"],
+    "melk": ["melk", "melke", "melkepulver", "melkeprotein", "kumelk", "helmelk", "lettmelk", "skummetmelk", "fløte", "rømme", "yoghurt", "laktose"],
+    "melkeprodukt": ["melk", "melke", "melkepulver", "melkeprotein", "kumelk", "helmelk", "lettmelk", "skummetmelk", "fløte", "rømme", "yoghurt", "laktose"],
+    "laktose": ["laktose", "melk", "melke", "fløte", "rømme", "yoghurt"],
+    "egg": ["egg", "eggehvite", "eggeplomme", "eggerøre"],
+    "gluten": ["gluten", "hvete", "hvetemel", "bygg", "rug", "spelt"],
+    "hvete": ["hvete", "hvetemel", "gluten"],
+    "skalldyr": ["skalldyr", "reke", "reker", "krabbe", "hummer", "kreps", "langust"],
+    "bløtdyr": ["bløtdyr", "blåskjell", "østers", "musling", "muslinger", "kamskjell", "blekksprut", "akkar"],
+    "fisk": ["fisk", "laks", "torsk", "makrell", "sild", "ørret", "sei", "kveite", "ansjos"],
+    "soya": ["soya", "soyasaus", "soyabønne", "soyabønner", "tofu", "edamame"],
+    "sesam": ["sesam", "sesamfrø", "sesamolje", "tahini"],
+    "selleri": ["selleri", "sellerirot", "sellerifrø"],
+    "sennep": ["sennep", "sennepsfrø"],
+  };
+
+  function expandAllergyKeywords(rawKeywords) {
+    const expanded = new Set();
+    rawKeywords.forEach((kw) => {
+      expanded.add(kw);
+      Object.keys(ALLERGY_SYNONYMS).forEach((key) => {
+        if (kw.includes(key) || key.includes(kw)) {
+          ALLERGY_SYNONYMS[key].forEach((syn) => expanded.add(syn));
+        }
+      });
+    });
+    return Array.from(expanded);
+  }
+
   function allergyKeywords(text) {
     if (!text) return [];
-    return text.toLowerCase()
+    const raw = text.toLowerCase()
       .split(/[,;.\n]+|\bog\b|\beller\b/)
       .map((s) => s.trim())
       .filter((s) => s.length > 2);
+    return expandAllergyKeywords(raw);
   }
 
   function itemMatchesAllergy(item, keywords) {
@@ -242,11 +288,29 @@
     libraryLoaded = true;
   }
 
+  // Pure — derives the 👍/👎 button highlight from a persisted net feedback score. A positive
+  // net score highlights 👍, negative highlights 👎, zero (or never voted) highlights neither.
+  // Used by loadFeedback() below to fix roadmap #10 ("👍/👎 nullstilles visuelt ved omlasting"):
+  // the score itself already persisted correctly, only the button highlight was session-only
+  // (state.feedbackToggle got reset to {} on every showApp()) — this reconstructs it from the
+  // same score the database already has, instead of adding new state to track separately.
+  function feedbackToggleFromScore(score) {
+    if (score > 0) return "up";
+    if (score < 0) return "down";
+    return undefined;
+  }
+
   async function loadFeedback() {
     const rows = await Dinero.db("feedback").select("*", { household_id: "eq." + state.uid });
     const byKind = { dinner: {}, matpakke: {}, bakst: {} };
-    (rows || []).forEach((r) => { (byKind[r.item_kind] || (byKind[r.item_kind] = {}))[r.item_id] = r.score; });
+    const toggle = {};
+    (rows || []).forEach((r) => {
+      (byKind[r.item_kind] || (byKind[r.item_kind] = {}))[r.item_id] = r.score;
+      const t = feedbackToggleFromScore(r.score);
+      if (t) toggle[r.item_kind + ":" + r.item_id] = t;
+    });
     state.feedback = byKind;
+    state.feedbackToggle = toggle;
   }
 
   async function loadInventory() {
