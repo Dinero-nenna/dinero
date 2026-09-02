@@ -455,8 +455,20 @@
   // filter would leave nothing to choose from) plus a soft ~1.15x-per-match nudge from
   // matpakke_preferences (via textMatchCount(), the cuisine_preferences equivalent for items
   // that have no `cuisine` tag).
+  // FIX (roadmap #3, 2026-09-02): bake day was hardcoded to "Ons" — now reads the household's
+  // own choice (`household.bake_day`, a lowercase day code like the existing godtlevert_days
+  // convention: man/tir/ons/tor/fre), defaulting to "ons" for households that haven't set one
+  // (matches the column's own DB default, so a pre-migration household behaves identically to
+  // before). Pure, so it's directly testable.
+  function bakeDayLabel(household) {
+    const code = ((household && household.bake_day) || "ons").toLowerCase();
+    const map = { man: "Man", tir: "Tir", ons: "Ons", tor: "Tor", fre: "Fre" };
+    return map[code] || "Ons";
+  }
+
   function generateMatpakkePlanRows(weekKey, excludeIds) {
-    const mpDays = ["Man", "Tir", "Tor", "Fre"]; // Ons is the bake day, matching the prototype
+    const bakeDay = bakeDayLabel(state.household);
+    const mpDays = WEEKDAY_LABELS.filter((d) => d !== bakeDay); // the other four weekdays get matpakke
     const keywords = allergyKeywords(state.household.allergies);
     const prefKeywords = cuisineKeywords(state.household.matpakke_preferences);
 
@@ -486,7 +498,7 @@
       });
     });
     rows.push({
-      household_id: state.uid, week_key: weekKey, day_label: "Ons", slot_type: "bakst",
+      household_id: state.uid, week_key: weekKey, day_label: bakeDay, slot_type: "bakst",
       item_id: bakeId, side_id: sideIds[mpDays.length % sideIds.length] || null,
     });
     if (bakeId) chosen.push(bakeId);
@@ -624,6 +636,11 @@
       return `<label><input type="checkbox" name="glday" value="${code}" ${checked}> ${label}</label>`;
     }
 
+    function bakeDayOptionsHtml(selected) {
+      const opts = [["man", "Mandag"], ["tir", "Tirsdag"], ["ons", "Onsdag"], ["tor", "Torsdag"], ["fre", "Fredag"]];
+      return opts.map(([code, label]) => `<option value="${code}" ${code === selected ? "selected" : ""}>${label}</option>`).join("");
+    }
+
     function render() {
       container.innerHTML = `
         <div class="card">
@@ -664,6 +681,8 @@
             <label for="ob-matpakke">Vi vil ha hjelp med matpakke også</label>
           </div>
           <div id="ob-matpakke-prefs-wrap" style="display:${household.matpakke_enabled !== false ? "block" : "none"};">
+            <label for="ob-bakedag">Hvilken dag baker dere?</label>
+            <select id="ob-bakedag">${bakeDayOptionsHtml((household.bake_day || "ons").toLowerCase())}</select>
             <label for="ob-matpakke-prefs">Matpakke-preferanser (fritekst)</label>
             <textarea class="plain" id="ob-matpakke-prefs" placeholder="F.eks. brødskiver med variert pålegg, gjerne noe søtt innimellom, ikke myke bananer">${esc(household.matpakke_preferences || "")}</textarea>
           </div>
@@ -726,6 +745,7 @@
         cuisine_preferences: document.getElementById("ob-cuisine").value.trim(),
         allergies: document.getElementById("ob-allergies").value.trim(),
         matpakke_enabled: document.getElementById("ob-matpakke").checked,
+        bake_day: document.getElementById("ob-bakedag").value,
         matpakke_preferences: document.getElementById("ob-matpakke-prefs").value.trim(),
         onboarding_completed: true,
       };
@@ -1314,15 +1334,16 @@
   // MATPAKKE
   // ================================================================================
 
+  // Pure — builds the day-row list for the Matpakke table, marking whichever weekday is the
+  // household's chosen bake day (roadmap #3). Extracted as its own function so it's directly
+  // testable without a DOM.
+  function matpakkeRowsForBakeDay(bakeDay) {
+    return WEEKDAY_LABELS.map((d) => ({ day: d, label: d, bake: d === bakeDay }));
+  }
+
   function renderMatpakke(main) {
     const weekKey = state.activeWeek;
-    const rows = [
-      { day: "Man", label: "Man" },
-      { day: "Tir", label: "Tir" },
-      { day: "Ons", label: "Ons", bake: true },
-      { day: "Tor", label: "Tor" },
-      { day: "Fre", label: "Fre" },
-    ];
+    const rows = matpakkeRowsForBakeDay(bakeDayLabel(state.household));
     main.innerHTML = `
       ${weekSwitcherHtml()}
       <div class="subhead">Matpakker (Man–Fre) — ${esc(WEEK_LABELS[weekKey])}</div>
