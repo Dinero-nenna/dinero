@@ -1469,7 +1469,6 @@
 
   function renderMatpakke(main) {
     const weekKey = state.activeWeek;
-    const rows = matpakkeRowsForBakeDay(bakeDayLabel(state.household));
     main.innerHTML = `
       ${weekSwitcherHtml()}
       <div class="subhead">Matpakker (Man–Fre) — ${esc(WEEK_LABELS[weekKey])}</div>
@@ -1491,7 +1490,19 @@
       await regenerateMatpakkeWeek(weekKey);
       renderMatpakke(main);
     });
+    renderMatpakkeBody();
+  }
+
+  // Rebuilds only #mp-body (the day-row table body), not the whole Matpakke tab — same "scoped
+  // re-render" pattern as renderDayList() under Middager (see that function's comment for the
+  // bug class this avoids). All row-level actions below (swap, 👍/👎, legg-til-handleliste, and
+  // the "Vis oppskrift" toggle) call this instead of the full renderMatpakke(main), so none of
+  // them has to rebuild the week-switcher/regen-button shell above the table.
+  function renderMatpakkeBody() {
+    const weekKey = state.activeWeek;
+    const rows = matpakkeRowsForBakeDay(bakeDayLabel(state.household));
     const body = document.getElementById("mp-body");
+    if (!body) return; // Matpakke tab isn't the one currently on screen — nothing to do
     body.innerHTML = rows.map((r) => {
       const slot = slotFor(r.day, r.bake ? "bakst" : "matpakke", weekKey);
       if (!slot) return `<tr><td>${r.label}</td><td colspan="3" class="hint">Ikke satt opp ennå.</td></tr>`;
@@ -1512,15 +1523,26 @@
       }
       const item = state.matpakke[slot.item_id];
       const fb = state.feedbackToggle["matpakke:" + slot.item_id];
+      // "Vis oppskrift" reuses state.openRecipes (slot-id-keyed, already used by the Middager
+      // day-list dinner cards) rather than a new set — slot ids are unique across the whole
+      // week_plan_slots table regardless of slot_type, so there's no collision risk.
+      const recipeOpen = state.openRecipes.has(slot.id);
+      const hasSteps = !!(item && item.steps && item.steps.length);
+      const recipeRow = recipeOpen ? `<tr class="recipe-row"><td colspan="4"><div class="recipe-box">
+          <strong>Ingredienser</strong>
+          <div class="ingredients">${esc(fmtIngr(item ? item.ingredients : []))}</div>
+          ${hasSteps ? `<strong>Fremgangsmåte</strong><ol>${item.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` : ""}
+        </div></td></tr>` : "";
       return `<tr><td>${r.label}</td>
         <td><div class="bake-cell"><span>${item ? esc(item.label) : "—"}</span>
           <div style="display:flex; gap:6px; align-items:center;">
             <button class="small-btn ${fb === "up" ? "active-fb" : ""}" data-mpfb="up" data-slot="${slot.id}">👍</button>
             <button class="small-btn ${fb === "down" ? "active-fb" : ""}" data-mpfb="down" data-slot="${slot.id}">👎</button>
             <button class="small-btn" data-swapmp="${slot.id}">Bytt ut</button>
+            <button class="small-btn recipe-btn ${recipeOpen ? "open" : ""}" data-recipe="${slot.id}">${recipeOpen ? "Skjul oppskrift" : "Vis oppskrift"}</button>
           </div></div></td>
         <td>${sideText}</td>
-        <td><button class="small-btn" data-addrow="${slot.id}" data-kind="matpakke">Legg til</button></td></tr>`;
+        <td><button class="small-btn" data-addrow="${slot.id}" data-kind="matpakke">Legg til</button></td></tr>${recipeRow}`;
     }).join("");
 
     body.querySelectorAll("[data-swapmp]").forEach((btn) => {
@@ -1530,7 +1552,7 @@
         if (newId == null) return; // pool exhausted (very small library) — leave as-is rather than clearing it
         await Dinero.db("week_plan_slots").update({ item_id: newId, updated_at: new Date().toISOString() }, { id: "eq." + slot.id });
         slot.item_id = newId;
-        renderMatpakke(main);
+        renderMatpakkeBody();
       });
     });
     body.querySelectorAll("[data-swapbake]").forEach((btn) => {
@@ -1540,22 +1562,29 @@
         if (newId == null) return; // pool exhausted (very small library) — leave as-is rather than clearing it
         await Dinero.db("week_plan_slots").update({ item_id: newId, updated_at: new Date().toISOString() }, { id: "eq." + slot.id });
         slot.item_id = newId;
-        renderMatpakke(main);
+        renderMatpakkeBody();
       });
     });
     body.querySelectorAll("[data-mpfb]").forEach((btn) => {
       btn.onclick = guard(async () => {
         const slot = state.weekSlots.find((s) => s.id === Number(btn.dataset.slot));
         await voteFeedback("matpakke", slot.item_id, btn.dataset.mpfb);
-        renderMatpakke(main);
+        renderMatpakkeBody();
       });
     });
     body.querySelectorAll("[data-bakefb]").forEach((btn) => {
       btn.onclick = guard(async () => {
         const slot = state.weekSlots.find((s) => s.id === Number(btn.dataset.slot));
         await voteFeedback("bakst", slot.item_id, btn.dataset.bakefb);
-        renderMatpakke(main);
+        renderMatpakkeBody();
       });
+    });
+    body.querySelectorAll("[data-recipe]").forEach((btn) => {
+      btn.onclick = () => {
+        const id = Number(btn.dataset.recipe);
+        if (state.openRecipes.has(id)) state.openRecipes.delete(id); else state.openRecipes.add(id);
+        renderMatpakkeBody();
+      };
     });
     body.querySelectorAll("[data-addrow]").forEach((btn) => {
       btn.onclick = guard(async () => {
