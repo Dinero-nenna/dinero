@@ -166,6 +166,44 @@
     return safe.length ? safe : pool; // never fully lock out a household — fall back rather than show nothing
   }
 
+  // ---------- vegetar: hardt filter, IKKE bare en mild dytt fra fritekst ----------
+  // FIX (2026-09-03, Tonje's feedback): a household typing "vi er vegetarianere, spiser ikke
+  // kjøtt og fisk" into the free-text cuisine_preferences field only ever got a soft ~1.15x
+  // nudge (see cuisineKeywords()/weightedPick() above) — the same mild treatment as someone
+  // writing "liker gjerne litt fisk". Free text can't reliably tell a firm restriction apart
+  // from a mild like/dislike without real language understanding (that's the deferred
+  // internet/AI roadmap item, #2) — so instead this is a dedicated, explicit checkbox
+  // (household.vegetar) that hard-filters, exactly like allergies do.
+  //
+  // Dinners already carry an authoritative `is_veg` boolean set per-recipe at insert time
+  // (schema.sql) — spot-checked against all 259 currently-live dinners' actual ingredient
+  // lists and found 100% consistent, so it's used directly rather than re-derived from
+  // keywords. matpakke_items/bake_items/sides have no such column, so those fall back to the
+  // same curated-keyword substring approach as the allergy filter above — same documented
+  // limitation (a short list of real words, not a food ontology; a future "vegetarpølse" or
+  // similar product could in principle false-match its root word, same class of caveat as the
+  // allergy synonym list).
+  const MEAT_FISH_KEYWORDS = [
+    "kjøtt", "kylling", "svin", "storfe", "biff", "indrefilet", "ytrefilet", "mørbrad", "entrecote",
+    "høyrygg", "lamme", "kalv", "elg", "hjort", "reinsdyr", "rådyr", "kalkun", "villsvin", "korv",
+    "pølse", "skinke", "bacon", "spekemat", "salami", "pepperoni", "medister", "flesk", "ribbe",
+    "leverpostei",
+    "fisk", "torsk", "laks", "sei", "makrell", "sild", "ørret", "reke", "skalldyr", "bløtdyr",
+    "blåskjell", "østers", "kamskjell", "musling", "blekksprut", "akkar", "kreps", "hummer",
+    "krabbe", "langust", "tunfisk", "kaviar", "breiflabb", "piggvar", "abbor", "scampi", "ansjos", "kveite",
+  ];
+
+  function filterVegetarian(pool, itemsById, vegetarian) {
+    if (!vegetarian) return pool;
+    const safe = pool.filter((id) => {
+      const item = itemsById[id];
+      if (!item) return false;
+      if (typeof item.is_veg === "boolean") return item.is_veg; // dinners: authoritative DB flag
+      return !itemMatchesAllergy(item, MEAT_FISH_KEYWORDS); // matpakke/bake/sides: keyword fallback
+    });
+    return safe.length ? safe : pool; // never fully lock a household out — same fallback philosophy as filterAllergySafe()
+  }
+
   // ---------- cuisine-preferences: enkel nøkkelord-matching (mild vekting, ikke et hardt filter) ----------
   const CUISINE_STOPWORDS = new Set([
     "og", "eller", "med", "liker", "gjerne", "mye", "litt", "for", "ikke", "av", "til", "som",
@@ -343,7 +381,8 @@
     const keywords = allergyKeywords(state.household.allergies);
     const cuisineKw = cuisineKeywords(state.household.cuisine_preferences);
     const fullPool = Object.keys(state.dinners);
-    const allergySafePool = filterAllergySafe(fullPool, state.dinners, keywords);
+    let allergySafePool = filterAllergySafe(fullPool, state.dinners, keywords);
+    allergySafePool = filterVegetarian(allergySafePool, state.dinners, state.household.vegetar);
     const chosen = [];
     const rows = [];
     DAY_LABELS.forEach((day) => {
@@ -473,21 +512,24 @@
     const prefKeywords = cuisineKeywords(state.household.matpakke_preferences);
 
     const mpFullPool = Object.keys(state.matpakke);
-    const mpAllergySafe = filterAllergySafe(mpFullPool, state.matpakke, keywords);
+    let mpAllergySafe = filterAllergySafe(mpFullPool, state.matpakke, keywords);
+    mpAllergySafe = filterVegetarian(mpAllergySafe, state.matpakke, state.household.vegetar);
     let mpPool = excludeIds && excludeIds.size ? mpAllergySafe.filter((id) => !excludeIds.has(id)) : mpAllergySafe;
-    if (mpPool.length < mpDays.length) mpPool = mpAllergySafe; // not enough left to fill every day distinctly — drop the cross-week exclusion but keep allergy safety
-    if (mpPool.length < mpDays.length) mpPool = mpFullPool; // allergy filter alone left too few — never fully lock a household out (matches filterAllergySafe()'s own fallback philosophy)
+    if (mpPool.length < mpDays.length) mpPool = mpAllergySafe; // not enough left to fill every day distinctly — drop the cross-week exclusion but keep allergy/vegetar safety
+    if (mpPool.length < mpDays.length) mpPool = mpFullPool; // filters alone left too few — never fully lock a household out (matches filterAllergySafe()'s own fallback philosophy)
     const mpIds = pickDistinct(mpPool, mpDays.length, {}, (i) => state.matpakke[i].ingredients, (i) => textMatchCount(state.matpakke[i], prefKeywords, "label"));
 
     const bakeFullPool = Object.keys(state.bake);
-    const bakeAllergySafe = filterAllergySafe(bakeFullPool, state.bake, keywords);
+    let bakeAllergySafe = filterAllergySafe(bakeFullPool, state.bake, keywords);
+    bakeAllergySafe = filterVegetarian(bakeAllergySafe, state.bake, state.household.vegetar);
     let bakePool = excludeIds && excludeIds.size ? bakeAllergySafe.filter((id) => !excludeIds.has(id)) : bakeAllergySafe;
     if (!bakePool.length) bakePool = bakeAllergySafe;
     if (!bakePool.length) bakePool = bakeFullPool;
     const bakeId = weightedPick(bakePool, {}, (i) => state.bake[i].ingredients, (i) => textMatchCount(state.bake[i], prefKeywords, "name"));
 
     const sideFullPool = Object.keys(state.sides);
-    const sideAllergySafe = filterAllergySafe(sideFullPool, state.sides, keywords);
+    let sideAllergySafe = filterAllergySafe(sideFullPool, state.sides, keywords);
+    sideAllergySafe = filterVegetarian(sideAllergySafe, state.sides, state.household.vegetar);
     const sideIds = shuffled(sideAllergySafe);
     const rows = [];
     const chosen = mpIds.slice();
@@ -555,6 +597,7 @@
     let pool = base.filter((id) => !used.has(id));
     if (!pool.length) pool = base;
     pool = filterAllergySafe(pool, state.dinners, keywords);
+    pool = filterVegetarian(pool, state.dinners, state.household.vegetar);
     if (!pool.length) pool = base.length ? base : Object.keys(state.dinners).filter((id) => id !== currentId);
     return weightedPick(pool, state.feedback.dinner, (id) => state.dinners[id].ingredients, (id) => cuisineMatchCount(state.dinners[id], cuisineKw));
   }
@@ -571,6 +614,7 @@
     let pool = base.filter((id) => !used.has(id));
     if (!pool.length) pool = base;
     pool = filterAllergySafe(pool, state.matpakke, keywords);
+    pool = filterVegetarian(pool, state.matpakke, state.household.vegetar);
     if (!pool.length) pool = base.length ? base : Object.keys(state.matpakke).filter((id) => id !== currentId);
     return weightedPick(pool, state.feedback.matpakke, (id) => state.matpakke[id].ingredients, (id) => textMatchCount(state.matpakke[id], prefKeywords, "label"));
   }
@@ -580,6 +624,7 @@
     const prefKeywords = cuisineKeywords(state.household.matpakke_preferences);
     let pool = Object.keys(state.bake).filter((id) => id !== currentId);
     pool = filterAllergySafe(pool, state.bake, keywords);
+    pool = filterVegetarian(pool, state.bake, state.household.vegetar);
     if (!pool.length) pool = Object.keys(state.bake).filter((id) => id !== currentId);
     return weightedPick(pool.length ? pool : Object.keys(state.bake), state.feedback.bakst, (id) => state.bake[id].ingredients, (id) => textMatchCount(state.bake[id], prefKeywords, "name"));
   }
@@ -672,6 +717,12 @@
           <label for="ob-cuisine">Hva liker dere å spise? (fritekst)</label>
           <textarea class="plain" id="ob-cuisine" placeholder="F.eks. mye asiatisk og italiensk, gjerne litt fisk, ikke for sterkt">${esc(household.cuisine_preferences || "")}</textarea>
 
+          <div class="checkbox-row">
+            <input type="checkbox" id="ob-vegetar" ${household.vegetar ? "checked" : ""}>
+            <label for="ob-vegetar">Husstanden spiser ikke kjøtt eller fisk (vegetar)</label>
+          </div>
+          <div class="hint">Dette er et fast filter, ikke bare en preferanse — er denne huket av får dere kun vegetarretter, uansett hva som står i fritekstfeltene over.</div>
+
           <label for="ob-allergies">Allergier eller annet dere ikke kan/vil spise</label>
           <textarea class="plain" id="ob-allergies" placeholder="F.eks. nøtteallergi, spiser ikke svin — skriv i vanlig tekst">${esc(household.allergies || "")}</textarea>
           <div class="hint">Vi bruker dette til å luke bort retter som inneholder det du skriver — enkel matching, ikke en fasit, så dobbeltsjekk gjerne selv.</div>
@@ -743,6 +794,7 @@
         uses_godtlevert: usesGodtlevert,
         godtlevert_days: godtlevertDays,
         cuisine_preferences: document.getElementById("ob-cuisine").value.trim(),
+        vegetar: document.getElementById("ob-vegetar").checked,
         allergies: document.getElementById("ob-allergies").value.trim(),
         matpakke_enabled: document.getElementById("ob-matpakke").checked,
         bake_day: document.getElementById("ob-bakedag").value,
