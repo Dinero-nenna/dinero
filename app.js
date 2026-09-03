@@ -743,11 +743,13 @@
         </div>`;
 
       document.getElementById("ob-add-child").onclick = () => {
+        syncChildrenFromDom();
         children.push({ name: "", age: "" });
         render();
       };
       container.querySelectorAll("[data-child-remove]").forEach((btn) => {
         btn.onclick = () => {
+          syncChildrenFromDom();
           const i = Number(btn.dataset.childRemove);
           children.splice(i, 1);
           if (!children.length) children.push({ name: "", age: "" });
@@ -776,6 +778,23 @@
         out.push({ name: name, age: ageRaw ? Number(ageRaw) : null });
       });
       return out;
+    }
+
+    // Pulls whatever is currently typed into the child name/age inputs back into the
+    // `children` array before we re-render (adding/removing a row calls render(), which
+    // rebuilds the whole child-rows block from `children` — without this sync step,
+    // anything already typed in would be silently discarded on every add/remove click).
+    function syncChildrenFromDom() {
+      container.querySelectorAll("[data-child-row]").forEach((row) => {
+        const i = Number(row.dataset.childRow);
+        if (!children[i]) return;
+        const nameEl = container.querySelector(`[data-child-name="${i}"]`);
+        const ageEl = container.querySelector(`[data-child-age="${i}"]`);
+        children[i] = {
+          name: nameEl ? nameEl.value : children[i].name,
+          age: ageEl ? ageEl.value : children[i].age,
+        };
+      });
     }
 
     async function submit() {
