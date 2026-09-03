@@ -676,6 +676,29 @@
       </div>`;
     }
 
+    // BUG FIX (2026-09-03, broader fix — Sidsel's report): add-child/remove-child used to call
+    // the full render() below, which rebuilds the ENTIRE form from the `household` closure
+    // variable — that wiped every other field the household had typed in (allergier,
+    // vegetar-avkrysning, matpreferanser, GodtLevert-dager, bakedag, antall voksne), not just
+    // the children rows, since none of those other fields' current DOM values ever get read
+    // back into anything before render() re-derives their HTML from the original, stale
+    // `household` object. Confirmed via a real-browser test before this fix (every field but
+    // the children ones was wiped by clicking "+ Legg til barn"). Fix: add/remove-child now
+    // only rebuilds the `#ob-children` block in place — the rest of the form's DOM, and
+    // whatever the household currently has typed into it, is left completely untouched.
+    function renderChildrenBlock() {
+      document.getElementById("ob-children").innerHTML = children.map(childRowHtml).join("");
+      document.querySelectorAll("#ob-children [data-child-remove]").forEach((btn) => {
+        btn.onclick = () => {
+          syncChildrenFromDom();
+          const i = Number(btn.dataset.childRemove);
+          children.splice(i, 1);
+          if (!children.length) children.push({ name: "", age: "" });
+          renderChildrenBlock();
+        };
+      });
+    }
+
     function dayCheckHtml(code, label) {
       const checked = (household.godtlevert_days || []).includes(code) ? "checked" : "";
       return `<label><input type="checkbox" name="glday" value="${code}" ${checked}> ${label}</label>`;
@@ -742,20 +765,12 @@
           <div class="error" id="ob-error"></div>
         </div>`;
 
+      renderChildrenBlock();
       document.getElementById("ob-add-child").onclick = () => {
         syncChildrenFromDom();
         children.push({ name: "", age: "" });
-        render();
+        renderChildrenBlock();
       };
-      container.querySelectorAll("[data-child-remove]").forEach((btn) => {
-        btn.onclick = () => {
-          syncChildrenFromDom();
-          const i = Number(btn.dataset.childRemove);
-          children.splice(i, 1);
-          if (!children.length) children.push({ name: "", age: "" });
-          render();
-        };
-      });
       const glCheckbox = document.getElementById("ob-godtlevert");
       glCheckbox.onchange = () => {
         document.getElementById("ob-godtlevert-days").style.display = glCheckbox.checked ? "block" : "none";
@@ -781,9 +796,9 @@
     }
 
     // Pulls whatever is currently typed into the child name/age inputs back into the
-    // `children` array before we re-render (adding/removing a row calls render(), which
-    // rebuilds the whole child-rows block from `children` — without this sync step,
-    // anything already typed in would be silently discarded on every add/remove click).
+    // `children` array before we re-render (adding/removing a row calls renderChildrenBlock(),
+    // which rebuilds the child-rows block from `children` — without this sync step, anything
+    // already typed into an existing row would be silently discarded on every add/remove click).
     function syncChildrenFromDom() {
       container.querySelectorAll("[data-child-row]").forEach((row) => {
         const i = Number(row.dataset.childRow);
@@ -1134,18 +1149,6 @@
 
   function renderMiddager(main) {
     const weekKey = state.activeWeek;
-    // BUG FIX (live-test regression): must filter by slot_type too, not just day+week — each
-    // day/week now has SEPARATE rows for dinner/godtlevert/flex AND matpakke/bakst (they share
-    // day_label+week_key but not slot_type). Without this filter, .find() could return a
-    // matpakke/bakst row instead of the dinner-ish one whenever a matpakke/bakst row happened
-    // to sort earlier in state.weekSlots than the real dinner row for that day — exactly what
-    // happened after "Regenerer": that only re-inserts dinner/flex/godtlevert rows (new ids,
-    // sorting after the untouched older matpakke/bakst rows for the same day), so the stale
-    // matpakke/bakst row got picked instead, rendering as "Fant ikke retten" since its item_id
-    // isn't in state.dinners at all.
-    const DINNERISH_TYPES = new Set(["dinner", "flex", "godtlevert"]);
-    const dinnerAndFlexSlots = DAY_LABELS.map((day) => state.weekSlots.find((s) => s.day_label === day && s.week_key === weekKey && DINNERISH_TYPES.has(s.slot_type))).filter(Boolean);
-
     main.innerHTML = `
       ${weekSwitcherHtml()}
       <div class="hint">👍/👎 og det du har hjemme påvirker hvilke retter "Bytt ut" plukker oftere framover — ikke bare her og nå.</div>
@@ -1169,7 +1172,36 @@
       renderMiddager(main);
     };
     if (state.showRecipeForm) bindRecipeFormHandlers(main);
+    renderDayList();
+  }
+
+  // BUG FIX (2026-09-03, found during a proactive audit after Sidsel's onboarding-form report):
+  // every day-list action (👍/👎, Bytt ut, ⚡ Rask, + Legg til middag, Fjern, Vis oppskrift)
+  // used to call the full renderMiddager(main) above, which rebuilds the ENTIRE Middager tab —
+  // including the "+ Legg til oppskrift" form, if it was open. Since that form's typed-but-
+  // unsaved fields (#rec-name, #rec-ingredients, ...) are never read back anywhere before that
+  // rebuild, a household mid-way through typing a recipe would silently lose everything the
+  // moment they also tapped 👍 on a dinner, swapped a dish, or expanded another recipe box —
+  // confirmed via a real-browser reproduction before this fix. Fix: those day-list-only actions
+  // now call this extracted renderDayList() instead, which only rebuilds `#day-list` — the
+  // recipe-form section (and whatever's currently typed into it) is completely untouched by
+  // anything that doesn't itself change the recipe-form section or the visible week/tab.
+  function renderDayList() {
+    const weekKey = state.activeWeek;
+    // BUG FIX (live-test regression): must filter by slot_type too, not just day+week — each
+    // day/week now has SEPARATE rows for dinner/godtlevert/flex AND matpakke/bakst (they share
+    // day_label+week_key but not slot_type). Without this filter, .find() could return a
+    // matpakke/bakst row instead of the dinner-ish one whenever a matpakke/bakst row happened
+    // to sort earlier in state.weekSlots than the real dinner row for that day — exactly what
+    // happened after "Regenerer": that only re-inserts dinner/flex/godtlevert rows (new ids,
+    // sorting after the untouched older matpakke/bakst rows for the same day), so the stale
+    // matpakke/bakst row got picked instead, rendering as "Fant ikke retten" since its item_id
+    // isn't in state.dinners at all.
+    const DINNERISH_TYPES = new Set(["dinner", "flex", "godtlevert"]);
+    const dinnerAndFlexSlots = DAY_LABELS.map((day) => state.weekSlots.find((s) => s.day_label === day && s.week_key === weekKey && DINNERISH_TYPES.has(s.slot_type))).filter(Boolean);
+
     const dayList = document.getElementById("day-list");
+    if (!dayList) return; // Middager tab isn't the one currently on screen — nothing to do
     dayList.innerHTML = dinnerAndFlexSlots.map((slot) => {
       if (slot.slot_type === "godtlevert") {
         return `<div class="day-row"><div class="day-label">${slot.day_label}</div>
@@ -1211,21 +1243,21 @@
         const slot = state.weekSlots.find((s) => s.id === Number(btn.dataset.flexremove));
         await Dinero.db("week_plan_slots").update({ item_id: null, updated_at: new Date().toISOString() }, { id: "eq." + slot.id });
         slot.item_id = null;
-        renderMiddager(main);
+        renderDayList();
       });
     });
     dayList.querySelectorAll("[data-recipe]").forEach((btn) => {
       btn.onclick = () => {
         const id = Number(btn.dataset.recipe);
         if (state.openRecipes.has(id)) state.openRecipes.delete(id); else state.openRecipes.add(id);
-        renderMiddager(main);
+        renderDayList();
       };
     });
     dayList.querySelectorAll("[data-fb]").forEach((btn) => {
       btn.onclick = guard(async () => {
         const [dishId, val] = btn.dataset.fb.split(":");
         await voteFeedback("dinner", dishId, val);
-        renderMiddager(main);
+        renderDayList();
       });
     });
   }
@@ -1237,7 +1269,7 @@
     if (newId == null) return;
     await Dinero.db("week_plan_slots").update({ item_id: newId, updated_at: new Date().toISOString() }, { id: "eq." + slot.id });
     slot.item_id = newId;
-    renderMiddager(document.getElementById("app-main"));
+    renderDayList(); // day-list-only update — see renderDayList()'s own comment for why not renderMiddager()
   }
 
   // ================================================================================
@@ -1310,6 +1342,35 @@
       </div>`;
   }
 
+  // Pure — the "Deres oppskrifter" list-or-empty-hint markup, extracted so it can be
+  // re-rendered on its own (see renderOwnRecipesList() below).
+  function ownRecipesListHtml() {
+    const ownRecipes = Object.values(state.dinners)
+      .filter((d) => d.created_by === state.uid)
+      .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+    return ownRecipes.length
+      ? `<div class="lib-list" id="own-recipes">${ownRecipes.map((d) => libraryDishCardHtml(d)).join("")}</div>`
+      : `<div class="hint">Dere har ikke lagt til noen oppskrifter ennå.</div>`;
+  }
+
+  // BUG FIX (2026-09-03, same audit as the day-list fix above): expanding/collapsing an
+  // EXISTING recipe's "Vis oppskrift" box in the "Deres oppskrifter" list used to call the
+  // full renderMiddager(main), which would also wipe whatever was currently typed into the
+  // "Legg til oppskrift" ADD form above it (name/time/ingredients/...) even though that toggle
+  // has nothing to do with the add-form. Fix: only rebuild the `#own-recipes-wrap` list itself.
+  function renderOwnRecipesList() {
+    const wrap = document.getElementById("own-recipes-wrap");
+    if (!wrap) return;
+    wrap.innerHTML = ownRecipesListHtml();
+    wrap.querySelectorAll("[data-lib-recipe]").forEach((btn) => {
+      btn.onclick = () => {
+        const id = btn.dataset.libRecipe;
+        if (state.openLibraryRecipes.has(id)) state.openLibraryRecipes.delete(id); else state.openLibraryRecipes.add(id);
+        renderOwnRecipesList();
+      };
+    });
+  }
+
   // Builds the "Legg til oppskrift" form + "Deres oppskrifter" list as an HTML string, meant to
   // be spliced into Middager's own main.innerHTML template (see renderMiddager above) — not a
   // separate tab/render target. bindRecipeFormHandlers() below wires up its interactive bits
@@ -1318,9 +1379,6 @@
     const cuisineOptions = Array.from(new Set(Object.values(state.dinners).map((d) => d.cuisine).filter(Boolean)))
       .sort((a, b) => a.localeCompare(b, "no"))
       .map((c) => `<option value="${esc(c)}"></option>`).join("");
-    const ownRecipes = Object.values(state.dinners)
-      .filter((d) => d.created_by === state.uid)
-      .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
 
     return `
       <div class="subhead">Legg til oppskrift</div>
@@ -1349,7 +1407,7 @@
       <button id="rec-submit">Legg til oppskrift</button>
 
       <div class="subhead">Deres oppskrifter</div>
-      ${ownRecipes.length ? `<div class="lib-list" id="own-recipes">${ownRecipes.map((d) => libraryDishCardHtml(d)).join("")}</div>` : `<div class="hint">Dere har ikke lagt til noen oppskrifter ennå.</div>`}
+      <div id="own-recipes-wrap">${ownRecipesListHtml()}</div>
     `;
   }
 
@@ -1363,16 +1421,13 @@
       el.innerHTML = msg ? `<div class="banner-error">${esc(msg)}</div>` : "";
     }
 
-    const ownListEl = document.getElementById("own-recipes");
-    if (ownListEl) {
-      ownListEl.querySelectorAll("[data-lib-recipe]").forEach((btn) => {
-        btn.onclick = () => {
-          const id = btn.dataset.libRecipe;
-          if (state.openLibraryRecipes.has(id)) state.openLibraryRecipes.delete(id); else state.openLibraryRecipes.add(id);
-          renderMiddager(main);
-        };
-      });
-    }
+    document.getElementById("own-recipes-wrap").querySelectorAll("[data-lib-recipe]").forEach((btn) => {
+      btn.onclick = () => {
+        const id = btn.dataset.libRecipe;
+        if (state.openLibraryRecipes.has(id)) state.openLibraryRecipes.delete(id); else state.openLibraryRecipes.add(id);
+        renderOwnRecipesList();
+      };
+    });
 
     document.getElementById("rec-submit").onclick = guard(async () => {
       showFormError("");
