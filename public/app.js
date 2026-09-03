@@ -92,16 +92,70 @@
   }
 
   // ---------- allergier: enkel nøkkelord-matching mot ingrediensnavn (ikke en allergen-ontologi) ----------
+
+  // FIX (roadmap #9, 2026-09-02): plain substring matching alone missed obvious word-forms —
+  // e.g. "peanøtter" does NOT substring-match "peanøttsmør" (different suffix: peanøtt-ER vs.
+  // peanøtt-SMØR), even though anyone with a peanut allergy needs peanøttsmør caught too. A
+  // small curated synonym/derivative list per common allergen, keyed by a normalized root —
+  // NOT a real allergen ontology (still the app's documented v1/v2 simplification), just the
+  // handful of cases a household is actually likely to type. Whichever raw keyword the
+  // household typed gets ALL of a matching entry's variants added alongside it (see
+  // expandAllergyKeywords() below), so itemMatchesAllergy()'s existing bidirectional substring
+  // check (unchanged) now also catches these derived forms.
+  const ALLERGY_SYNONYMS = {
+    "peanøtt": ["peanøtt", "peanøtter", "peanøttsmør", "peanøttolje", "jordnøtt", "jordnøtter"],
+    "peanøtter": ["peanøtt", "peanøtter", "peanøttsmør", "peanøttolje", "jordnøtt", "jordnøtter"],
+    "jordnøtt": ["peanøtt", "peanøtter", "peanøttsmør", "peanøttolje", "jordnøtt", "jordnøtter"],
+    "jordnøtter": ["peanøtt", "peanøtter", "peanøttsmør", "peanøttolje", "jordnøtt", "jordnøtter"],
+    "nøtt": ["nøtt", "nøtter", "mandel", "mandler", "hasselnøtt", "hasselnøtter", "valnøtt", "valnøtter", "cashewnøtt", "cashewnøtter", "pistasj", "pistasjnøtt", "peanøtt", "peanøtter"],
+    "nøtter": ["nøtt", "nøtter", "mandel", "mandler", "hasselnøtt", "hasselnøtter", "valnøtt", "valnøtter", "cashewnøtt", "cashewnøtter", "pistasj", "pistasjnøtt", "peanøtt", "peanøtter"],
+    "melk": ["melk", "melke", "melkepulver", "melkeprotein", "kumelk", "helmelk", "lettmelk", "skummetmelk", "fløte", "rømme", "yoghurt", "laktose"],
+    "melkeprodukt": ["melk", "melke", "melkepulver", "melkeprotein", "kumelk", "helmelk", "lettmelk", "skummetmelk", "fløte", "rømme", "yoghurt", "laktose"],
+    "laktose": ["laktose", "melk", "melke", "fløte", "rømme", "yoghurt"],
+    "egg": ["egg", "eggehvite", "eggeplomme", "eggerøre"],
+    "gluten": ["gluten", "hvete", "hvetemel", "bygg", "rug", "spelt"],
+    "hvete": ["hvete", "hvetemel", "gluten"],
+    "skalldyr": ["skalldyr", "reke", "reker", "krabbe", "hummer", "kreps", "langust"],
+    "bløtdyr": ["bløtdyr", "blåskjell", "østers", "musling", "muslinger", "kamskjell", "blekksprut", "akkar"],
+    "fisk": ["fisk", "laks", "torsk", "makrell", "sild", "ørret", "sei", "kveite", "ansjos"],
+    "soya": ["soya", "soyasaus", "soyabønne", "soyabønner", "tofu", "edamame"],
+    "sesam": ["sesam", "sesamfrø", "sesamolje", "tahini"],
+    "selleri": ["selleri", "sellerirot", "sellerifrø"],
+    "sennep": ["sennep", "sennepsfrø"],
+  };
+
+  function expandAllergyKeywords(rawKeywords) {
+    const expanded = new Set();
+    rawKeywords.forEach((kw) => {
+      expanded.add(kw);
+      Object.keys(ALLERGY_SYNONYMS).forEach((key) => {
+        if (kw.includes(key) || key.includes(kw)) {
+          ALLERGY_SYNONYMS[key].forEach((syn) => expanded.add(syn));
+        }
+      });
+    });
+    return Array.from(expanded);
+  }
+
   function allergyKeywords(text) {
     if (!text) return [];
-    return text.toLowerCase()
+    const raw = text.toLowerCase()
       .split(/[,;.\n]+|\bog\b|\beller\b/)
       .map((s) => s.trim())
       .filter((s) => s.length > 2);
+    return expandAllergyKeywords(raw);
   }
 
   function itemMatchesAllergy(item, keywords) {
     if (!keywords.length) return false;
+    // Sides have no `ingredients` array (schema: sides(id, amount, item_name)) — a flat name
+    // field instead, unlike dinners/matpakke_items/bake_items. Check that directly so
+    // filterAllergySafe() works unmodified on the sides pool too (2026-09-01, "tilbehør
+    // filtreres ikke på allergi" fix).
+    if (item.item_name) {
+      const name = item.item_name.toLowerCase();
+      return keywords.some((kw) => name.includes(kw) || kw.includes(name));
+    }
     const names = (item.ingredients || []).map((i) => (i.n || "").toLowerCase());
     return keywords.some((kw) => names.some((n) => n.includes(kw) || kw.includes(n)));
   }
@@ -110,6 +164,44 @@
     if (!keywords.length) return pool;
     const safe = pool.filter((id) => !itemMatchesAllergy(itemsById[id], keywords));
     return safe.length ? safe : pool; // never fully lock out a household — fall back rather than show nothing
+  }
+
+  // ---------- vegetar: hardt filter, IKKE bare en mild dytt fra fritekst ----------
+  // FIX (2026-09-03, Tonje's feedback): a household typing "vi er vegetarianere, spiser ikke
+  // kjøtt og fisk" into the free-text cuisine_preferences field only ever got a soft ~1.15x
+  // nudge (see cuisineKeywords()/weightedPick() above) — the same mild treatment as someone
+  // writing "liker gjerne litt fisk". Free text can't reliably tell a firm restriction apart
+  // from a mild like/dislike without real language understanding (that's the deferred
+  // internet/AI roadmap item, #2) — so instead this is a dedicated, explicit checkbox
+  // (household.vegetar) that hard-filters, exactly like allergies do.
+  //
+  // Dinners already carry an authoritative `is_veg` boolean set per-recipe at insert time
+  // (schema.sql) — spot-checked against all 259 currently-live dinners' actual ingredient
+  // lists and found 100% consistent, so it's used directly rather than re-derived from
+  // keywords. matpakke_items/bake_items/sides have no such column, so those fall back to the
+  // same curated-keyword substring approach as the allergy filter above — same documented
+  // limitation (a short list of real words, not a food ontology; a future "vegetarpølse" or
+  // similar product could in principle false-match its root word, same class of caveat as the
+  // allergy synonym list).
+  const MEAT_FISH_KEYWORDS = [
+    "kjøtt", "kylling", "svin", "storfe", "biff", "indrefilet", "ytrefilet", "mørbrad", "entrecote",
+    "høyrygg", "lamme", "kalv", "elg", "hjort", "reinsdyr", "rådyr", "kalkun", "villsvin", "korv",
+    "pølse", "skinke", "bacon", "spekemat", "salami", "pepperoni", "medister", "flesk", "ribbe",
+    "leverpostei",
+    "fisk", "torsk", "laks", "sei", "makrell", "sild", "ørret", "reke", "skalldyr", "bløtdyr",
+    "blåskjell", "østers", "kamskjell", "musling", "blekksprut", "akkar", "kreps", "hummer",
+    "krabbe", "langust", "tunfisk", "kaviar", "breiflabb", "piggvar", "abbor", "scampi", "ansjos", "kveite",
+  ];
+
+  function filterVegetarian(pool, itemsById, vegetarian) {
+    if (!vegetarian) return pool;
+    const safe = pool.filter((id) => {
+      const item = itemsById[id];
+      if (!item) return false;
+      if (typeof item.is_veg === "boolean") return item.is_veg; // dinners: authoritative DB flag
+      return !itemMatchesAllergy(item, MEAT_FISH_KEYWORDS); // matpakke/bake/sides: keyword fallback
+    });
+    return safe.length ? safe : pool; // never fully lock a household out — same fallback philosophy as filterAllergySafe()
   }
 
   // ---------- cuisine-preferences: enkel nøkkelord-matching (mild vekting, ikke et hardt filter) ----------
@@ -234,11 +326,29 @@
     libraryLoaded = true;
   }
 
+  // Pure — derives the 👍/👎 button highlight from a persisted net feedback score. A positive
+  // net score highlights 👍, negative highlights 👎, zero (or never voted) highlights neither.
+  // Used by loadFeedback() below to fix roadmap #10 ("👍/👎 nullstilles visuelt ved omlasting"):
+  // the score itself already persisted correctly, only the button highlight was session-only
+  // (state.feedbackToggle got reset to {} on every showApp()) — this reconstructs it from the
+  // same score the database already has, instead of adding new state to track separately.
+  function feedbackToggleFromScore(score) {
+    if (score > 0) return "up";
+    if (score < 0) return "down";
+    return undefined;
+  }
+
   async function loadFeedback() {
     const rows = await Dinero.db("feedback").select("*", { household_id: "eq." + state.uid });
     const byKind = { dinner: {}, matpakke: {}, bakst: {} };
-    (rows || []).forEach((r) => { (byKind[r.item_kind] || (byKind[r.item_kind] = {}))[r.item_id] = r.score; });
+    const toggle = {};
+    (rows || []).forEach((r) => {
+      (byKind[r.item_kind] || (byKind[r.item_kind] = {}))[r.item_id] = r.score;
+      const t = feedbackToggleFromScore(r.score);
+      if (t) toggle[r.item_kind + ":" + r.item_id] = t;
+    });
     state.feedback = byKind;
+    state.feedbackToggle = toggle;
   }
 
   async function loadInventory() {
@@ -271,7 +381,8 @@
     const keywords = allergyKeywords(state.household.allergies);
     const cuisineKw = cuisineKeywords(state.household.cuisine_preferences);
     const fullPool = Object.keys(state.dinners);
-    const allergySafePool = filterAllergySafe(fullPool, state.dinners, keywords);
+    let allergySafePool = filterAllergySafe(fullPool, state.dinners, keywords);
+    allergySafePool = filterVegetarian(allergySafePool, state.dinners, state.household.vegetar);
     const chosen = [];
     const rows = [];
     DAY_LABELS.forEach((day) => {
@@ -383,26 +494,43 @@
   // filter would leave nothing to choose from) plus a soft ~1.15x-per-match nudge from
   // matpakke_preferences (via textMatchCount(), the cuisine_preferences equivalent for items
   // that have no `cuisine` tag).
+  // FIX (roadmap #3, 2026-09-02): bake day was hardcoded to "Ons" — now reads the household's
+  // own choice (`household.bake_day`, a lowercase day code like the existing godtlevert_days
+  // convention: man/tir/ons/tor/fre), defaulting to "ons" for households that haven't set one
+  // (matches the column's own DB default, so a pre-migration household behaves identically to
+  // before). Pure, so it's directly testable.
+  function bakeDayLabel(household) {
+    const code = ((household && household.bake_day) || "ons").toLowerCase();
+    const map = { man: "Man", tir: "Tir", ons: "Ons", tor: "Tor", fre: "Fre" };
+    return map[code] || "Ons";
+  }
+
   function generateMatpakkePlanRows(weekKey, excludeIds) {
-    const mpDays = ["Man", "Tir", "Tor", "Fre"]; // Ons is the bake day, matching the prototype
+    const bakeDay = bakeDayLabel(state.household);
+    const mpDays = WEEKDAY_LABELS.filter((d) => d !== bakeDay); // the other four weekdays get matpakke
     const keywords = allergyKeywords(state.household.allergies);
     const prefKeywords = cuisineKeywords(state.household.matpakke_preferences);
 
     const mpFullPool = Object.keys(state.matpakke);
-    const mpAllergySafe = filterAllergySafe(mpFullPool, state.matpakke, keywords);
+    let mpAllergySafe = filterAllergySafe(mpFullPool, state.matpakke, keywords);
+    mpAllergySafe = filterVegetarian(mpAllergySafe, state.matpakke, state.household.vegetar);
     let mpPool = excludeIds && excludeIds.size ? mpAllergySafe.filter((id) => !excludeIds.has(id)) : mpAllergySafe;
-    if (mpPool.length < mpDays.length) mpPool = mpAllergySafe; // not enough left to fill every day distinctly — drop the cross-week exclusion but keep allergy safety
-    if (mpPool.length < mpDays.length) mpPool = mpFullPool; // allergy filter alone left too few — never fully lock a household out (matches filterAllergySafe()'s own fallback philosophy)
+    if (mpPool.length < mpDays.length) mpPool = mpAllergySafe; // not enough left to fill every day distinctly — drop the cross-week exclusion but keep allergy/vegetar safety
+    if (mpPool.length < mpDays.length) mpPool = mpFullPool; // filters alone left too few — never fully lock a household out (matches filterAllergySafe()'s own fallback philosophy)
     const mpIds = pickDistinct(mpPool, mpDays.length, {}, (i) => state.matpakke[i].ingredients, (i) => textMatchCount(state.matpakke[i], prefKeywords, "label"));
 
     const bakeFullPool = Object.keys(state.bake);
-    const bakeAllergySafe = filterAllergySafe(bakeFullPool, state.bake, keywords);
+    let bakeAllergySafe = filterAllergySafe(bakeFullPool, state.bake, keywords);
+    bakeAllergySafe = filterVegetarian(bakeAllergySafe, state.bake, state.household.vegetar);
     let bakePool = excludeIds && excludeIds.size ? bakeAllergySafe.filter((id) => !excludeIds.has(id)) : bakeAllergySafe;
     if (!bakePool.length) bakePool = bakeAllergySafe;
     if (!bakePool.length) bakePool = bakeFullPool;
     const bakeId = weightedPick(bakePool, {}, (i) => state.bake[i].ingredients, (i) => textMatchCount(state.bake[i], prefKeywords, "name"));
 
-    const sideIds = shuffled(Object.keys(state.sides));
+    const sideFullPool = Object.keys(state.sides);
+    let sideAllergySafe = filterAllergySafe(sideFullPool, state.sides, keywords);
+    sideAllergySafe = filterVegetarian(sideAllergySafe, state.sides, state.household.vegetar);
+    const sideIds = shuffled(sideAllergySafe);
     const rows = [];
     const chosen = mpIds.slice();
     mpDays.forEach((day, i) => {
@@ -412,7 +540,7 @@
       });
     });
     rows.push({
-      household_id: state.uid, week_key: weekKey, day_label: "Ons", slot_type: "bakst",
+      household_id: state.uid, week_key: weekKey, day_label: bakeDay, slot_type: "bakst",
       item_id: bakeId, side_id: sideIds[mpDays.length % sideIds.length] || null,
     });
     if (bakeId) chosen.push(bakeId);
@@ -469,6 +597,7 @@
     let pool = base.filter((id) => !used.has(id));
     if (!pool.length) pool = base;
     pool = filterAllergySafe(pool, state.dinners, keywords);
+    pool = filterVegetarian(pool, state.dinners, state.household.vegetar);
     if (!pool.length) pool = base.length ? base : Object.keys(state.dinners).filter((id) => id !== currentId);
     return weightedPick(pool, state.feedback.dinner, (id) => state.dinners[id].ingredients, (id) => cuisineMatchCount(state.dinners[id], cuisineKw));
   }
@@ -485,6 +614,7 @@
     let pool = base.filter((id) => !used.has(id));
     if (!pool.length) pool = base;
     pool = filterAllergySafe(pool, state.matpakke, keywords);
+    pool = filterVegetarian(pool, state.matpakke, state.household.vegetar);
     if (!pool.length) pool = base.length ? base : Object.keys(state.matpakke).filter((id) => id !== currentId);
     return weightedPick(pool, state.feedback.matpakke, (id) => state.matpakke[id].ingredients, (id) => textMatchCount(state.matpakke[id], prefKeywords, "label"));
   }
@@ -494,6 +624,7 @@
     const prefKeywords = cuisineKeywords(state.household.matpakke_preferences);
     let pool = Object.keys(state.bake).filter((id) => id !== currentId);
     pool = filterAllergySafe(pool, state.bake, keywords);
+    pool = filterVegetarian(pool, state.bake, state.household.vegetar);
     if (!pool.length) pool = Object.keys(state.bake).filter((id) => id !== currentId);
     return weightedPick(pool.length ? pool : Object.keys(state.bake), state.feedback.bakst, (id) => state.bake[id].ingredients, (id) => textMatchCount(state.bake[id], prefKeywords, "name"));
   }
@@ -545,9 +676,37 @@
       </div>`;
     }
 
+    // BUG FIX (2026-09-03, broader fix — Sidsel's report): add-child/remove-child used to call
+    // the full render() below, which rebuilds the ENTIRE form from the `household` closure
+    // variable — that wiped every other field the household had typed in (allergier,
+    // vegetar-avkrysning, matpreferanser, GodtLevert-dager, bakedag, antall voksne), not just
+    // the children rows, since none of those other fields' current DOM values ever get read
+    // back into anything before render() re-derives their HTML from the original, stale
+    // `household` object. Confirmed via a real-browser test before this fix (every field but
+    // the children ones was wiped by clicking "+ Legg til barn"). Fix: add/remove-child now
+    // only rebuilds the `#ob-children` block in place — the rest of the form's DOM, and
+    // whatever the household currently has typed into it, is left completely untouched.
+    function renderChildrenBlock() {
+      document.getElementById("ob-children").innerHTML = children.map(childRowHtml).join("");
+      document.querySelectorAll("#ob-children [data-child-remove]").forEach((btn) => {
+        btn.onclick = () => {
+          syncChildrenFromDom();
+          const i = Number(btn.dataset.childRemove);
+          children.splice(i, 1);
+          if (!children.length) children.push({ name: "", age: "" });
+          renderChildrenBlock();
+        };
+      });
+    }
+
     function dayCheckHtml(code, label) {
       const checked = (household.godtlevert_days || []).includes(code) ? "checked" : "";
       return `<label><input type="checkbox" name="glday" value="${code}" ${checked}> ${label}</label>`;
+    }
+
+    function bakeDayOptionsHtml(selected) {
+      const opts = [["man", "Mandag"], ["tir", "Tirsdag"], ["ons", "Onsdag"], ["tor", "Torsdag"], ["fre", "Fredag"]];
+      return opts.map(([code, label]) => `<option value="${code}" ${code === selected ? "selected" : ""}>${label}</option>`).join("");
     }
 
     function render() {
@@ -581,6 +740,12 @@
           <label for="ob-cuisine">Hva liker dere å spise? (fritekst)</label>
           <textarea class="plain" id="ob-cuisine" placeholder="F.eks. mye asiatisk og italiensk, gjerne litt fisk, ikke for sterkt">${esc(household.cuisine_preferences || "")}</textarea>
 
+          <div class="checkbox-row">
+            <input type="checkbox" id="ob-vegetar" ${household.vegetar ? "checked" : ""}>
+            <label for="ob-vegetar">Husstanden spiser ikke kjøtt eller fisk (vegetar)</label>
+          </div>
+          <div class="hint">Dette er et fast filter, ikke bare en preferanse — er denne huket av får dere kun vegetarretter, uansett hva som står i fritekstfeltene over.</div>
+
           <label for="ob-allergies">Allergier eller annet dere ikke kan/vil spise</label>
           <textarea class="plain" id="ob-allergies" placeholder="F.eks. nøtteallergi, spiser ikke svin — skriv i vanlig tekst">${esc(household.allergies || "")}</textarea>
           <div class="hint">Vi bruker dette til å luke bort retter som inneholder det du skriver — enkel matching, ikke en fasit, så dobbeltsjekk gjerne selv.</div>
@@ -590,6 +755,8 @@
             <label for="ob-matpakke">Vi vil ha hjelp med matpakke også</label>
           </div>
           <div id="ob-matpakke-prefs-wrap" style="display:${household.matpakke_enabled !== false ? "block" : "none"};">
+            <label for="ob-bakedag">Hvilken dag baker dere?</label>
+            <select id="ob-bakedag">${bakeDayOptionsHtml((household.bake_day || "ons").toLowerCase())}</select>
             <label for="ob-matpakke-prefs">Matpakke-preferanser (fritekst)</label>
             <textarea class="plain" id="ob-matpakke-prefs" placeholder="F.eks. brødskiver med variert pålegg, gjerne noe søtt innimellom, ikke myke bananer">${esc(household.matpakke_preferences || "")}</textarea>
           </div>
@@ -598,18 +765,12 @@
           <div class="error" id="ob-error"></div>
         </div>`;
 
+      renderChildrenBlock();
       document.getElementById("ob-add-child").onclick = () => {
+        syncChildrenFromDom();
         children.push({ name: "", age: "" });
-        render();
+        renderChildrenBlock();
       };
-      container.querySelectorAll("[data-child-remove]").forEach((btn) => {
-        btn.onclick = () => {
-          const i = Number(btn.dataset.childRemove);
-          children.splice(i, 1);
-          if (!children.length) children.push({ name: "", age: "" });
-          render();
-        };
-      });
       const glCheckbox = document.getElementById("ob-godtlevert");
       glCheckbox.onchange = () => {
         document.getElementById("ob-godtlevert-days").style.display = glCheckbox.checked ? "block" : "none";
@@ -634,6 +795,23 @@
       return out;
     }
 
+    // Pulls whatever is currently typed into the child name/age inputs back into the
+    // `children` array before we re-render (adding/removing a row calls renderChildrenBlock(),
+    // which rebuilds the child-rows block from `children` — without this sync step, anything
+    // already typed into an existing row would be silently discarded on every add/remove click).
+    function syncChildrenFromDom() {
+      container.querySelectorAll("[data-child-row]").forEach((row) => {
+        const i = Number(row.dataset.childRow);
+        if (!children[i]) return;
+        const nameEl = container.querySelector(`[data-child-name="${i}"]`);
+        const ageEl = container.querySelector(`[data-child-age="${i}"]`);
+        children[i] = {
+          name: nameEl ? nameEl.value : children[i].name,
+          age: ageEl ? ageEl.value : children[i].age,
+        };
+      });
+    }
+
     async function submit() {
       const errEl = document.getElementById("ob-error");
       errEl.style.display = "none";
@@ -650,8 +828,10 @@
         uses_godtlevert: usesGodtlevert,
         godtlevert_days: godtlevertDays,
         cuisine_preferences: document.getElementById("ob-cuisine").value.trim(),
+        vegetar: document.getElementById("ob-vegetar").checked,
         allergies: document.getElementById("ob-allergies").value.trim(),
         matpakke_enabled: document.getElementById("ob-matpakke").checked,
+        bake_day: document.getElementById("ob-bakedag").value,
         matpakke_preferences: document.getElementById("ob-matpakke-prefs").value.trim(),
         onboarding_completed: true,
       };
@@ -969,18 +1149,6 @@
 
   function renderMiddager(main) {
     const weekKey = state.activeWeek;
-    // BUG FIX (live-test regression): must filter by slot_type too, not just day+week — each
-    // day/week now has SEPARATE rows for dinner/godtlevert/flex AND matpakke/bakst (they share
-    // day_label+week_key but not slot_type). Without this filter, .find() could return a
-    // matpakke/bakst row instead of the dinner-ish one whenever a matpakke/bakst row happened
-    // to sort earlier in state.weekSlots than the real dinner row for that day — exactly what
-    // happened after "Regenerer": that only re-inserts dinner/flex/godtlevert rows (new ids,
-    // sorting after the untouched older matpakke/bakst rows for the same day), so the stale
-    // matpakke/bakst row got picked instead, rendering as "Fant ikke retten" since its item_id
-    // isn't in state.dinners at all.
-    const DINNERISH_TYPES = new Set(["dinner", "flex", "godtlevert"]);
-    const dinnerAndFlexSlots = DAY_LABELS.map((day) => state.weekSlots.find((s) => s.day_label === day && s.week_key === weekKey && DINNERISH_TYPES.has(s.slot_type))).filter(Boolean);
-
     main.innerHTML = `
       ${weekSwitcherHtml()}
       <div class="hint">👍/👎 og det du har hjemme påvirker hvilke retter "Bytt ut" plukker oftere framover — ikke bare her og nå.</div>
@@ -1004,7 +1172,36 @@
       renderMiddager(main);
     };
     if (state.showRecipeForm) bindRecipeFormHandlers(main);
+    renderDayList();
+  }
+
+  // BUG FIX (2026-09-03, found during a proactive audit after Sidsel's onboarding-form report):
+  // every day-list action (👍/👎, Bytt ut, ⚡ Rask, + Legg til middag, Fjern, Vis oppskrift)
+  // used to call the full renderMiddager(main) above, which rebuilds the ENTIRE Middager tab —
+  // including the "+ Legg til oppskrift" form, if it was open. Since that form's typed-but-
+  // unsaved fields (#rec-name, #rec-ingredients, ...) are never read back anywhere before that
+  // rebuild, a household mid-way through typing a recipe would silently lose everything the
+  // moment they also tapped 👍 on a dinner, swapped a dish, or expanded another recipe box —
+  // confirmed via a real-browser reproduction before this fix. Fix: those day-list-only actions
+  // now call this extracted renderDayList() instead, which only rebuilds `#day-list` — the
+  // recipe-form section (and whatever's currently typed into it) is completely untouched by
+  // anything that doesn't itself change the recipe-form section or the visible week/tab.
+  function renderDayList() {
+    const weekKey = state.activeWeek;
+    // BUG FIX (live-test regression): must filter by slot_type too, not just day+week — each
+    // day/week now has SEPARATE rows for dinner/godtlevert/flex AND matpakke/bakst (they share
+    // day_label+week_key but not slot_type). Without this filter, .find() could return a
+    // matpakke/bakst row instead of the dinner-ish one whenever a matpakke/bakst row happened
+    // to sort earlier in state.weekSlots than the real dinner row for that day — exactly what
+    // happened after "Regenerer": that only re-inserts dinner/flex/godtlevert rows (new ids,
+    // sorting after the untouched older matpakke/bakst rows for the same day), so the stale
+    // matpakke/bakst row got picked instead, rendering as "Fant ikke retten" since its item_id
+    // isn't in state.dinners at all.
+    const DINNERISH_TYPES = new Set(["dinner", "flex", "godtlevert"]);
+    const dinnerAndFlexSlots = DAY_LABELS.map((day) => state.weekSlots.find((s) => s.day_label === day && s.week_key === weekKey && DINNERISH_TYPES.has(s.slot_type))).filter(Boolean);
+
     const dayList = document.getElementById("day-list");
+    if (!dayList) return; // Middager tab isn't the one currently on screen — nothing to do
     dayList.innerHTML = dinnerAndFlexSlots.map((slot) => {
       if (slot.slot_type === "godtlevert") {
         return `<div class="day-row"><div class="day-label">${slot.day_label}</div>
@@ -1046,21 +1243,21 @@
         const slot = state.weekSlots.find((s) => s.id === Number(btn.dataset.flexremove));
         await Dinero.db("week_plan_slots").update({ item_id: null, updated_at: new Date().toISOString() }, { id: "eq." + slot.id });
         slot.item_id = null;
-        renderMiddager(main);
+        renderDayList();
       });
     });
     dayList.querySelectorAll("[data-recipe]").forEach((btn) => {
       btn.onclick = () => {
         const id = Number(btn.dataset.recipe);
         if (state.openRecipes.has(id)) state.openRecipes.delete(id); else state.openRecipes.add(id);
-        renderMiddager(main);
+        renderDayList();
       };
     });
     dayList.querySelectorAll("[data-fb]").forEach((btn) => {
       btn.onclick = guard(async () => {
         const [dishId, val] = btn.dataset.fb.split(":");
         await voteFeedback("dinner", dishId, val);
-        renderMiddager(main);
+        renderDayList();
       });
     });
   }
@@ -1072,7 +1269,7 @@
     if (newId == null) return;
     await Dinero.db("week_plan_slots").update({ item_id: newId, updated_at: new Date().toISOString() }, { id: "eq." + slot.id });
     slot.item_id = newId;
-    renderMiddager(document.getElementById("app-main"));
+    renderDayList(); // day-list-only update — see renderDayList()'s own comment for why not renderMiddager()
   }
 
   // ================================================================================
@@ -1145,6 +1342,35 @@
       </div>`;
   }
 
+  // Pure — the "Deres oppskrifter" list-or-empty-hint markup, extracted so it can be
+  // re-rendered on its own (see renderOwnRecipesList() below).
+  function ownRecipesListHtml() {
+    const ownRecipes = Object.values(state.dinners)
+      .filter((d) => d.created_by === state.uid)
+      .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+    return ownRecipes.length
+      ? `<div class="lib-list" id="own-recipes">${ownRecipes.map((d) => libraryDishCardHtml(d)).join("")}</div>`
+      : `<div class="hint">Dere har ikke lagt til noen oppskrifter ennå.</div>`;
+  }
+
+  // BUG FIX (2026-09-03, same audit as the day-list fix above): expanding/collapsing an
+  // EXISTING recipe's "Vis oppskrift" box in the "Deres oppskrifter" list used to call the
+  // full renderMiddager(main), which would also wipe whatever was currently typed into the
+  // "Legg til oppskrift" ADD form above it (name/time/ingredients/...) even though that toggle
+  // has nothing to do with the add-form. Fix: only rebuild the `#own-recipes-wrap` list itself.
+  function renderOwnRecipesList() {
+    const wrap = document.getElementById("own-recipes-wrap");
+    if (!wrap) return;
+    wrap.innerHTML = ownRecipesListHtml();
+    wrap.querySelectorAll("[data-lib-recipe]").forEach((btn) => {
+      btn.onclick = () => {
+        const id = btn.dataset.libRecipe;
+        if (state.openLibraryRecipes.has(id)) state.openLibraryRecipes.delete(id); else state.openLibraryRecipes.add(id);
+        renderOwnRecipesList();
+      };
+    });
+  }
+
   // Builds the "Legg til oppskrift" form + "Deres oppskrifter" list as an HTML string, meant to
   // be spliced into Middager's own main.innerHTML template (see renderMiddager above) — not a
   // separate tab/render target. bindRecipeFormHandlers() below wires up its interactive bits
@@ -1153,9 +1379,6 @@
     const cuisineOptions = Array.from(new Set(Object.values(state.dinners).map((d) => d.cuisine).filter(Boolean)))
       .sort((a, b) => a.localeCompare(b, "no"))
       .map((c) => `<option value="${esc(c)}"></option>`).join("");
-    const ownRecipes = Object.values(state.dinners)
-      .filter((d) => d.created_by === state.uid)
-      .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
 
     return `
       <div class="subhead">Legg til oppskrift</div>
@@ -1184,7 +1407,7 @@
       <button id="rec-submit">Legg til oppskrift</button>
 
       <div class="subhead">Deres oppskrifter</div>
-      ${ownRecipes.length ? `<div class="lib-list" id="own-recipes">${ownRecipes.map((d) => libraryDishCardHtml(d)).join("")}</div>` : `<div class="hint">Dere har ikke lagt til noen oppskrifter ennå.</div>`}
+      <div id="own-recipes-wrap">${ownRecipesListHtml()}</div>
     `;
   }
 
@@ -1198,16 +1421,13 @@
       el.innerHTML = msg ? `<div class="banner-error">${esc(msg)}</div>` : "";
     }
 
-    const ownListEl = document.getElementById("own-recipes");
-    if (ownListEl) {
-      ownListEl.querySelectorAll("[data-lib-recipe]").forEach((btn) => {
-        btn.onclick = () => {
-          const id = btn.dataset.libRecipe;
-          if (state.openLibraryRecipes.has(id)) state.openLibraryRecipes.delete(id); else state.openLibraryRecipes.add(id);
-          renderMiddager(main);
-        };
-      });
-    }
+    document.getElementById("own-recipes-wrap").querySelectorAll("[data-lib-recipe]").forEach((btn) => {
+      btn.onclick = () => {
+        const id = btn.dataset.libRecipe;
+        if (state.openLibraryRecipes.has(id)) state.openLibraryRecipes.delete(id); else state.openLibraryRecipes.add(id);
+        renderOwnRecipesList();
+      };
+    });
 
     document.getElementById("rec-submit").onclick = guard(async () => {
       showFormError("");
@@ -1240,15 +1460,16 @@
   // MATPAKKE
   // ================================================================================
 
+  // Pure — builds the day-row list for the Matpakke table, marking whichever weekday is the
+  // household's chosen bake day (roadmap #3). Extracted as its own function so it's directly
+  // testable without a DOM.
+  function matpakkeRowsForBakeDay(bakeDay) {
+    return WEEKDAY_LABELS.map((d) => ({ day: d, label: d, bake: d === bakeDay }));
+  }
+
   function renderMatpakke(main) {
     const weekKey = state.activeWeek;
-    const rows = [
-      { day: "Man", label: "Man" },
-      { day: "Tir", label: "Tir" },
-      { day: "Ons", label: "Ons", bake: true },
-      { day: "Tor", label: "Tor" },
-      { day: "Fre", label: "Fre" },
-    ];
+    const rows = matpakkeRowsForBakeDay(bakeDayLabel(state.household));
     main.innerHTML = `
       ${weekSwitcherHtml()}
       <div class="subhead">Matpakker (Man–Fre) — ${esc(WEEK_LABELS[weekKey])}</div>
