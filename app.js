@@ -919,6 +919,7 @@
       <div id="app-banner"></div>
       <nav class="tabs" id="app-tabs"></nav>
       <div id="app-main"><div class="hint">Laster …</div></div>
+      <nav class="bottom-tabs" id="app-bottom-tabs"></nav>
     `;
 
     document.getElementById("app-logout-btn").onclick = () => { if (window.doLogout) window.doLogout(); };
@@ -1035,20 +1036,30 @@
 
   function renderTabs(container) {
     const tabs = [
-      { id: "middager", label: "Middager" },
+      { id: "middager", label: "Middager", icon: "🍽️" },
     ];
-    if (state.household.matpakke_enabled) tabs.push({ id: "matpakke", label: "Matpakke" });
-    tabs.push({ id: "handleliste", label: "Handleliste" });
-    tabs.push({ id: "inventar", label: "Inventar" });
-    tabs.push({ id: "hjelp", label: "Hjelp" });
+    if (state.household.matpakke_enabled) tabs.push({ id: "matpakke", label: "Matpakke", icon: "🥪" });
+    tabs.push({ id: "handleliste", label: "Handleliste", icon: "🛒" });
+    tabs.push({ id: "inventar", label: "Inventar", icon: "🥫" });
+    tabs.push({ id: "hjelp", label: "Hjelp", icon: "ℹ️" });
 
     if (!tabs.some((t) => t.id === state.activeTab)) state.activeTab = "middager";
 
+    const onTabClick = (btn) => { state.activeTab = btn.dataset.tab; renderTabs(container); };
+
     const nav = document.getElementById("app-tabs");
     nav.innerHTML = tabs.map((t) => `<button data-tab="${t.id}" class="${t.id === state.activeTab ? "active" : ""}">${t.label}</button>`).join("");
-    nav.querySelectorAll("button").forEach((btn) => {
-      btn.onclick = () => { state.activeTab = btn.dataset.tab; renderTabs(container); };
-    });
+    nav.querySelectorAll("button").forEach((btn) => { btn.onclick = () => onTabClick(btn); });
+
+    // Bottom tab bar — same tabs/state, shown instead of nav.tabs on narrow (phone) widths via CSS.
+    const bottomNav = document.getElementById("app-bottom-tabs");
+    if (bottomNav) {
+      bottomNav.innerHTML = tabs.map((t) => `
+        <button data-tab="${t.id}" class="${t.id === state.activeTab ? "active" : ""}">
+          <span class="bt-icon">${t.icon}</span><span class="bt-label">${t.label}</span>
+        </button>`).join("");
+      bottomNav.querySelectorAll("button").forEach((btn) => { btn.onclick = () => onTabClick(btn); });
+    }
     renderActiveTab();
   }
 
@@ -1159,6 +1170,25 @@
   // MIDDAGER
   // ================================================================================
 
+  // Deterministic, cuisine-name-based accent color (not tied to any one dish) so the same
+  // cuisine always gets the same subtle left-border color across the day list, "Deres
+  // oppskrifter", etc. — a lightweight visual break from monotony without dish photos
+  // (she explicitly didn't want images: "Takk, jeg vil ikke ha bilder").
+  const CUISINE_PALETTE = ["#6b2a26", "#a3752f", "#4f6076", "#3f7ea6", "#4b7a3a", "#83507a", "#8a6d3f"];
+  function cuisineColor(cuisine) {
+    const s = String(cuisine || "");
+    let hash = 0;
+    for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+    return CUISINE_PALETTE[hash % CUISINE_PALETTE.length];
+  }
+  // Wraps dishCardHtml()'s inner markup in the actual `.dish-card` element, applying the
+  // cuisine accent color — the one place that decides the wrapper so every call site (day
+  // list, flex slot, library list) stays visually consistent.
+  function dishCardWrapHtml(dish, innerHtml, extraClass) {
+    const cls = ["dish-card", "cuisine-accent"].concat(extraClass ? [extraClass] : []).join(" ");
+    return `<div class="${cls}" style="--cuisine-color:${cuisineColor(dish.cuisine)}">${innerHtml}</div>`;
+  }
+
   function dishCardHtml(slot, dish, opts) {
     opts = opts || {};
     const key = "dinner:" + dish.id;
@@ -1262,12 +1292,12 @@
         const dish = state.dinners[slot.item_id];
         if (!dish) return `<div class="day-row"><div class="day-label">${slot.day_label}</div><div class="dish-card"><div class="hint">Fant ikke retten.</div></div></div>`;
         return `<div class="day-row"><div class="day-label">${slot.day_label}</div>
-          <div class="dish-card">${dishCardHtml(slot, dish, { badge: "Ekstra middag", removable: true })}</div></div>`;
+          ${dishCardWrapHtml(dish, dishCardHtml(slot, dish, { badge: "Ekstra middag", removable: true }))}</div>`;
       }
       // slot_type === 'dinner'
       const dish = state.dinners[slot.item_id];
       if (!dish) return `<div class="day-row"><div class="day-label">${slot.day_label}</div><div class="dish-card"><div class="hint">Fant ikke retten — prøv "Bytt ut".</div></div></div>`;
-      return `<div class="day-row"><div class="day-label">${slot.day_label}</div><div class="dish-card">${dishCardHtml(slot, dish)}</div></div>`;
+      return `<div class="day-row"><div class="day-label">${slot.day_label}</div>${dishCardWrapHtml(dish, dishCardHtml(slot, dish))}</div>`;
     }).join("");
 
     dayList.querySelectorAll("[data-swap]").forEach((btn) => {
@@ -1365,8 +1395,7 @@
 
   function libraryDishCardHtml(dish) {
     const open = state.openLibraryRecipes.has(dish.id);
-    return `
-      <div class="dish-card">
+    const inner = `
         <div class="card-title-row"><h3>${esc(dish.name)}</h3></div>
         <div class="tags">
           <span class="badge time">${dish.time_minutes} min</span>
@@ -1382,8 +1411,8 @@
         </div>` : ""}
         <div class="row-actions">
           <button data-lib-recipe="${esc(dish.id)}" class="recipe-btn ${open ? "open" : ""}">${open ? "Skjul oppskrift" : "Vis oppskrift"}</button>
-        </div>
-      </div>`;
+        </div>`;
+    return dishCardWrapHtml(dish, inner);
   }
 
   // Pure — the "Deres oppskrifter" list-or-empty-hint markup, extracted so it can be
