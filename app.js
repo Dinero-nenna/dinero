@@ -1111,7 +1111,7 @@
     const onTabClick = (btn) => { state.activeTab = btn.dataset.tab; renderTabs(container); };
 
     const nav = document.getElementById("app-tabs");
-    nav.innerHTML = tabs.map((t) => `<button data-tab="${t.id}" class="${t.id === state.activeTab ? "active" : ""}">${t.label}</button>`).join("");
+    nav.innerHTML = tabs.map((t) => `<button data-tab="${t.id}" class="${t.id === state.activeTab ? "active" : ""}"><span class="t-icon">${t.icon}</span>${t.label}</button>`).join("");
     nav.querySelectorAll("button").forEach((btn) => { btn.onclick = () => onTabClick(btn); });
 
     // Bottom tab bar — same tabs/state, shown instead of nav.tabs on narrow (phone) widths via CSS.
@@ -1161,8 +1161,8 @@
         body: "Retter du liker dukker oftere opp igjen ved «Bytt ut». Retter du ikke liker dukker sjeldnere opp — men forsvinner aldri helt, så variasjonen består.",
       },
       {
-        title: "Endret du innstillinger? Trykk «Regenerer»",
-        body: "Å lagre nye innstillinger (allergier, preferanser, antall middager …) endrer ikke en uke som allerede er planlagt. «Regenerer middagene»/«Regenerer matpakkene» lager nye forslag for den uken basert på det du nettopp lagret.",
+        title: "Endret du innstillinger? Trykk «Regenerer alt»",
+        body: "Å lagre nye innstillinger (allergier, preferanser, antall middager …) endrer ikke uker som allerede er planlagt. Knappen «Regenerer alt» i Innstillinger lager nye forslag for alle ukene, basert på det du nettopp lagret.",
       },
       {
         title: "Matkasse-dagene dine holder seg faste",
@@ -1285,25 +1285,20 @@
   }
 
   function renderMiddager(main) {
-    const weekKey = state.activeWeek;
     main.innerHTML = `
       ${weekSwitcherHtml()}
       <div class="hint">👍/👎 og det du har hjemme påvirker hvilke retter "Bytt ut" plukker oftere framover — ikke bare her og nå.</div>
       <div class="row-actions" style="margin-bottom:14px;">
-        <button class="small-btn" id="regen-week-btn">Regenerer middagene for «${esc(WEEK_LABELS[weekKey])}»</button>
         <button class="small-btn" id="recipe-toggle-btn">${state.showRecipeForm ? "Skjul oppskrift-skjema" : "+ Legg til oppskrift"}</button>
       </div>
       ${state.showRecipeForm ? recipeFormSectionHtml() : ""}
       <div id="day-list"></div>
     `;
     bindWeekSwitcher(main, () => renderMiddager(main));
-    document.getElementById("regen-week-btn").onclick = guard(async () => {
-      const label = WEEK_LABELS[weekKey];
-      const ok = confirm(`Dette bytter ut ALLE middager for "${label}" med nye forslag, og fjerner eventuelle manuelle bytter du har gjort for den uka. Fortsette?`);
-      if (!ok) return;
-      await regenerateDinnerWeek(weekKey);
-      renderMiddager(main);
-    });
+    // "Regenerer middagene for «uken»" (per-week/per-tab regenerate) removed 2026-09-07, her
+    // request — felt like unnecessary repetition now that "Regenerer alt" in Innstillinger
+    // covers it ("Det er da man må ta valget"). regenerateDinnerWeek() itself is untouched —
+    // still called internally by regenerateAllAndSave() in showOnboarding().
     document.getElementById("recipe-toggle-btn").onclick = () => {
       state.showRecipeForm = !state.showRecipeForm;
       renderMiddager(main);
@@ -1604,14 +1599,10 @@
   }
 
   function renderMatpakke(main) {
-    const weekKey = state.activeWeek;
     main.innerHTML = `
       ${weekSwitcherHtml()}
-      <div class="subhead">Matpakker (Man–Fre) — ${esc(WEEK_LABELS[weekKey])}</div>
+      <div class="subhead">Matpakker</div>
       <div class="hint">👍/👎 påvirker hvilke matpakker "Bytt ut" plukker oftere framover — og allergier/preferanser fra innstillingene dine påvirker alle forslagene.</div>
-      <div class="row-actions" style="margin-bottom:14px;">
-        <button class="small-btn" id="regen-mp-btn">Regenerer matpakkene for «${esc(WEEK_LABELS[weekKey])}»</button>
-      </div>
       <div style="overflow-x:auto;">
         <table class="matpakke">
           <thead><tr><th>Dag</th><th>Matpakke</th><th>Tilbehør</th><th>Handleliste</th></tr></thead>
@@ -1619,13 +1610,11 @@
         </table>
       </div>`;
     bindWeekSwitcher(main, () => renderMatpakke(main));
-    document.getElementById("regen-mp-btn").onclick = guard(async () => {
-      const label = WEEK_LABELS[weekKey];
-      const ok = confirm(`Dette bytter ut ALLE matpakker og bakst for "${label}" med nye forslag, og fjerner eventuelle manuelle bytter du har gjort for den uka. Fortsette?`);
-      if (!ok) return;
-      await regenerateMatpakkeWeek(weekKey);
-      renderMatpakke(main);
-    });
+    // "Matpakker (Man–Fre) — «uken»" subhead and "Regenerer matpakkene for «uken»" button both
+    // removed 2026-09-07, her request — the weekday range and the active week were already
+    // shown by the table rows and the week-switcher pills right above, and per-week regenerate
+    // felt redundant now that "Regenerer alt" lives in Innstillinger. regenerateMatpakkeWeek()
+    // itself is untouched — still called internally by regenerateAllAndSave().
     renderMatpakkeBody();
   }
 
