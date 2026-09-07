@@ -704,15 +704,13 @@
       return `<label><input type="checkbox" name="glday" value="${code}" ${checked}> ${label}</label>`;
     }
 
-    function bakeDayOptionsHtml(selected) {
-      const opts = [["man", "Mandag"], ["tir", "Tirsdag"], ["ons", "Onsdag"], ["tor", "Torsdag"], ["fre", "Fredag"]];
-      return opts.map(([code, label]) => `<option value="${code}" ${code === selected ? "selected" : ""}>${label}</option>`).join("");
-    }
-
     function render() {
       container.innerHTML = `
         <div class="card">
-          <h2>Tilpass matpreferanser</h2>
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+            <h2 style="margin:0;">Tilpass matpreferanser</h2>
+            ${!opts.firstTime ? `<button type="button" class="secondary" id="ob-cancel" style="width:auto; margin-top:0; padding:6px 14px; flex-shrink:0;">Lukk</button>` : ""}
+          </div>
           <p class="hint">${opts.firstTime ? "Noen raske spørsmål før vi setter opp ukeplanen deres — tar under to minutter." : "Endre husstandens innstillinger når som helst."}</p>
 
           <label for="ob-adults">Antall voksne</label>
@@ -755,8 +753,6 @@
             <label for="ob-matpakke">Vi vil ha hjelp med matpakke også</label>
           </div>
           <div id="ob-matpakke-prefs-wrap" style="display:${household.matpakke_enabled !== false ? "block" : "none"};">
-            <label for="ob-bakedag">Hvilken dag baker dere?</label>
-            <select id="ob-bakedag">${bakeDayOptionsHtml((household.bake_day || "ons").toLowerCase())}</select>
             <label for="ob-matpakke-prefs">Matpakke-preferanser (fritekst)</label>
             <textarea class="plain" id="ob-matpakke-prefs" placeholder="F.eks. brødskiver med variert pålegg, gjerne noe søtt innimellom, ikke myke bananer">${esc(household.matpakke_preferences || "")}</textarea>
           </div>
@@ -787,10 +783,16 @@
       document.getElementById("ob-submit").onclick = () => submit();
       const regenAllBtn = document.getElementById("ob-regen-all");
       if (regenAllBtn) regenAllBtn.onclick = () => regenerateAllAndSave();
+      // "Lukk" (her request, 2026-09-07: åpner innstillinger "bare for å se litt" føltes
+      // skummelt når eneste vei ut var å lagre). Only shown when re-opening settings later
+      // (not during mandatory first-time onboarding). Goes straight back via onDone with the
+      // ORIGINAL, unmodified `household` object — no DB call at all, so nothing is saved.
+      const cancelBtn = document.getElementById("ob-cancel");
+      if (cancelBtn) cancelBtn.onclick = () => { if (typeof opts.onDone === "function") opts.onDone(household); };
     }
 
     // Shared by submit() and regenerateAllAndSave() — reads every form field into the
-    // household patch shape the DB expects. Extracted (2026-09-08, her request: "en knapp i
+    // household patch shape the DB expects. Extracted (2026-09-07, her request: "en knapp i
     // instillinger der man kan klikke regenerer alt") so "Regenerer alt" can save the same
     // values as the normal submit button before regenerating, without duplicating field reads.
     function buildPatchFromForm() {
@@ -810,7 +812,10 @@
         vegetar: document.getElementById("ob-vegetar").checked,
         allergies: document.getElementById("ob-allergies").value.trim(),
         matpakke_enabled: document.getElementById("ob-matpakke").checked,
-        bake_day: document.getElementById("ob-bakedag").value,
+        // bake_day (2026-09-07): removed from settings UI entirely (her request — "det har
+        // ikke noe å si hvilken dag man baker"). No longer read from the form at all, so
+        // saving settings never touches this column — whatever value a household already has
+        // (default "ons" from the original migration) is simply left as-is in the DB.
         matpakke_preferences: document.getElementById("ob-matpakke-prefs").value.trim(),
         onboarding_completed: true,
       };
@@ -872,7 +877,7 @@
       }
     }
 
-    // "Regenerer alt" (her request, 2026-09-08: going through Middager+Matpakke, per week, to
+    // "Regenerer alt" (her request, 2026-09-07: going through Middager+Matpakke, per week, to
     // apply a settings change was "litt tungvindt"). Saves the current form the same way
     // submit() does, then regenerates ALL SIX week/category buckets (denne/neste/uken etter ×
     // middager/matpakke) in one go instead of making her click "Regenerer" six separate times.
