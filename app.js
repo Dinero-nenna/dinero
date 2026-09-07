@@ -840,13 +840,57 @@
       try {
         const rows = await Dinero.db("households").update(patch, { id: "eq." + household.id });
         const updated = (rows && rows[0]) ? rows[0] : Object.assign({}, household, patch);
-        if (typeof opts.onDone === "function") opts.onDone(updated);
+        // ADDED (2026-09-07): first-time households only get one extra low-friction step before
+        // entering the app — a "check off what you always have" staples screen, so inventory
+        // isn't a blank, un-adopted tab from day one. Re-opening settings later (firstTime false)
+        // skips straight to onDone as before; that path already has its own way in via the
+        // Inventar tab's own "+ Foreslå faste varer" toggle.
+        if (opts.firstTime) {
+          await renderStaplesStep(updated);
+        } else if (typeof opts.onDone === "function") {
+          opts.onDone(updated);
+        }
       } catch (e) {
         errEl.textContent = errMsg(e);
         errEl.style.display = "block";
       } finally {
-        btn.disabled = false;
+        if (btn) btn.disabled = false;
       }
+    }
+
+    async function renderStaplesStep(updatedHousehold) {
+      let existingNames = [];
+      try {
+        const rows = await Dinero.db("inventory_items").select("item_name", { household_id: "eq." + state.uid });
+        existingNames = (rows || []).map((r) => r.item_name.toLowerCase());
+      } catch (e) {
+        // Non-fatal — worst case the checklist just doesn't pre-tick anything already there.
+      }
+      container.innerHTML = `
+        <div class="card">
+          <h2>Faste varer</h2>
+          <p class="hint">Har dere noen av disse hjemme til vanlig? Huk av det som stemmer — resten kan legges til senere under fanen «Inventar». Dette gjør at handlelisten automatisk vet hva dere allerede har, i stedet for å foreslå at dere kjøper det på nytt.</p>
+          <div id="ob-staples-groups">${staplesChecklistHtml(existingNames)}</div>
+          <button id="ob-staples-submit">Legg til valgte og fortsett</button>
+          <button type="button" class="add-link-btn" id="ob-staples-skip">Hopp over</button>
+          <div class="error" id="ob-staples-error"></div>
+        </div>`;
+      const submitBtn = document.getElementById("ob-staples-submit");
+      submitBtn.onclick = async () => {
+        submitBtn.disabled = true;
+        try {
+          await insertSelectedStaples(document.getElementById("ob-staples-groups"));
+          if (typeof opts.onDone === "function") opts.onDone(updatedHousehold);
+        } catch (e) {
+          const errEl2 = document.getElementById("ob-staples-error");
+          errEl2.textContent = errMsg(e);
+          errEl2.style.display = "block";
+          submitBtn.disabled = false;
+        }
+      };
+      document.getElementById("ob-staples-skip").onclick = () => {
+        if (typeof opts.onDone === "function") opts.onDone(updatedHousehold);
+      };
     }
 
     render();
@@ -1739,11 +1783,17 @@
       list.innerHTML = `<li class="hint">Handlelisten er tom. Den fylles automatisk fra ukens middager.</li>`;
     } else {
       list.innerHTML = lastShopRows.map((row) => {
-        const have = !row.is_manual && haveAtHome(row.ingredient_name);
+        // FIX (2026-09-07): used to be `!row.is_manual && haveAtHome(...)` — manual rows never
+        // got the "har hjemme"/dimmed treatment even after being added to inventory via the new
+        // "Fast vare, har alltid hjemme" button below, which would've made that button look like
+        // it did nothing. Now consistent for every row, auto or manual.
+        const have = haveAtHome(row.ingredient_name);
         return `<li class="${row.checked ? "" : "have"}">
           <input type="checkbox" ${row.checked ? "checked" : ""} data-shop-check="${row.id}">
           <span>${row.amount ? esc(row.amount) + " " : ""}${esc(row.ingredient_name)}</span>
-          ${have ? '<span class="have-tag">har hjemme</span>' : ""}
+          ${have
+            ? '<span class="have-tag">har hjemme</span>'
+            : `<button class="staple-btn" data-shop-staple="${row.id}" title="Legg denne varen til i inventaret">Fast vare, har alltid hjemme</button>`}
           ${row.is_manual ? `<button class="remove" data-shop-remove="${row.id}">✕</button>` : ""}
         </li>`;
       }).join("");
@@ -1754,6 +1804,20 @@
         await Dinero.db("shopping_list_items").update({ checked: cb.checked }, { id: "eq." + id });
         const row = lastShopRows.find((r) => r.id === id);
         if (row) row.checked = cb.checked;
+        await refreshShopList();
+      });
+    });
+    // ADDED (2026-09-07, approved wording "Fast vare, har alltid hjemme"): a one-click way to
+    // mark a shopping-list item as something the household always has, without navigating to
+    // the separate Inventar tab. Defaults to category "Annet" — a shopping-list row carries no
+    // category info to seed it with, and "Annet" is freely re-categorizable later from Inventar.
+    list.querySelectorAll("[data-shop-staple]").forEach((btn) => {
+      btn.onclick = guard(async () => {
+        const id = Number(btn.dataset.shopStaple);
+        const row = lastShopRows.find((r) => r.id === id);
+        if (!row) return;
+        await Dinero.db("inventory_items").insert([{ household_id: state.uid, category: "Annet", item_name: row.ingredient_name }]);
+        await loadInventory();
         await refreshShopList();
       });
     });
@@ -1808,6 +1872,51 @@
 
   const INVENTORY_CATEGORY_SUGGESTIONS = ["Fryser", "Kjøleskap", "Skap — tørrvarer", "Skap — sauser og hermetikk", "Annet"];
 
+  // ADDED (2026-09-07, "hva kan vi gjøre for å øke bruken av inventardelen"): a curated list of
+  // common Norwegian pantry staples, used by two entry points that share this same data and the
+  // same "check off what you always have" flow — the one-time first-time-onboarding step
+  // (showOnboarding's renderStaplesStep) and the "+ Foreslå faste varer" quick-add inside the
+  // Inventar tab itself (renderInventar below), for households that skipped/finished onboarding
+  // long ago. Neither ever forces anything in — everything starts unchecked (already-present
+  // items come pre-checked+disabled) and both are one click away from "Hopp over"/closing.
+  const STAPLE_SUGGESTIONS = [
+    { category: "Skap — tørrvarer", items: ["Salt", "Pepper", "Sukker", "Mel", "Ris", "Pasta", "Havregryn", "Matolje"] },
+    { category: "Skap — sauser og hermetikk", items: ["Ketchup", "Sennep", "Hermetiske tomater", "Buljong"] },
+    { category: "Kjøleskap", items: ["Smør", "Melk"] },
+    { category: "Fryser", items: ["Brød"] },
+  ];
+
+  // Renders the checkbox grid (grouped, reusing the .inv-group/.day-picker styling that's
+  // already on the page for onboarding's day-picker) — items already in inventory (by
+  // case-insensitive name match) come pre-checked and disabled, so re-opening this never
+  // suggests adding a duplicate.
+  function staplesChecklistHtml(alreadyHaveLower) {
+    return STAPLE_SUGGESTIONS.map((group) => `
+      <div class="inv-group">
+        <h4>${esc(group.category)}</h4>
+        <div class="day-picker">
+          ${group.items.map((name) => {
+            const already = alreadyHaveLower.includes(name.toLowerCase());
+            return `<label>
+              <input type="checkbox" data-staple="${esc(name)}" data-staple-cat="${esc(group.category)}" ${already ? "checked disabled" : ""}>
+              ${esc(name)}${already ? " ✓" : ""}
+            </label>`;
+          }).join("")}
+        </div>
+      </div>`).join("");
+  }
+
+  // Bulk-inserts whatever's checked (and not disabled, i.e. not already in inventory) within
+  // `root`. Returns how many rows were added, purely so callers can decide what to say/do next.
+  async function insertSelectedStaples(root) {
+    const boxes = Array.from(root.querySelectorAll("[data-staple]:checked:not(:disabled)"));
+    if (!boxes.length) return 0;
+    await Promise.all(boxes.map((cb) =>
+      Dinero.db("inventory_items").insert([{ household_id: state.uid, category: cb.dataset.stapleCat, item_name: cb.dataset.staple }])
+    ));
+    return boxes.length;
+  }
+
   async function renderInventar(main) {
     // FIX (feedback item 7): a real <select>, always freely reselectable — the old
     // <input list="…"> combobox left the typed suggestion text sitting in the field after a
@@ -1825,6 +1934,8 @@
         <input type="text" id="inv-item" placeholder="Vare, f.eks. laksefilet">
         <button id="inv-add">Legg til</button>
       </div>
+      <button type="button" class="add-link-btn" id="inv-staples-toggle">+ Foreslå faste varer</button>
+      <div id="inv-staples-box" style="display:none; margin: 12px 0 20px;"></div>
       <div id="inv-groups"><div class="hint">Laster …</div></div>
     `;
     const catSelect = document.getElementById("inv-category");
@@ -1852,6 +1963,24 @@
       document.getElementById(id).addEventListener("keydown", (e) => { if (e.key === "Enter") document.getElementById("inv-add").click(); });
     });
 
+    const staplesBox = document.getElementById("inv-staples-box");
+    document.getElementById("inv-staples-toggle").onclick = () => {
+      const isOpen = staplesBox.style.display !== "none";
+      if (isOpen) { staplesBox.style.display = "none"; return; }
+      staplesBox.innerHTML = `
+        <div class="hint">Huk av det dere alltid har hjemme — varer som allerede står i inventaret er forhåndshuket.</div>
+        ${staplesChecklistHtml(state.inventoryNames)}
+        <button type="button" id="inv-staples-add">Legg til valgte</button>
+      `;
+      staplesBox.style.display = "block";
+      document.getElementById("inv-staples-add").onclick = guard(async () => {
+        await insertSelectedStaples(staplesBox);
+        staplesBox.style.display = "none";
+        await loadInventory();
+        renderInventoryGroups();
+      });
+    };
+
     try {
       await loadInventory();
     } catch (e) {
@@ -1876,7 +2005,12 @@
       <div class="inv-group">
         <h4>${esc(cat)}</h4>
         <div class="inv-items">
-          ${items.map((item) => `<span class="inv-chip">${esc(item.item_name)}<button data-inv-remove="${item.id}" title="Fjern">✕</button></span>`).join("")}
+          ${items.map((item) => `
+            <span class="inv-chip">
+              <span data-inv-text="${item.id}">${esc(item.item_name)}</span>
+              <button data-inv-edit="${item.id}" title="Rediger">✎</button>
+              <button data-inv-remove="${item.id}" title="Fjern">✕</button>
+            </span>`).join("")}
         </div>
       </div>`).join("");
     el.querySelectorAll("[data-inv-remove]").forEach((btn) => {
@@ -1885,6 +2019,41 @@
         await loadInventory();
         renderInventoryGroups();
       });
+    });
+
+    // ADDED (2026-09-07, "jeg må slette alt og skrive på nytt" — she'd been maintaining
+    // inventory as delete-and-retype because item_name had no UPDATE path at all before this).
+    // Turns a chip's text into an inline input on click; Enter/blur saves, Escape cancels back
+    // to the original text. Emptying the field or leaving it unchanged saves nothing (re-renders
+    // as a no-op) — you can never lose an item by accident through this control. A `done` flag
+    // stops the Enter-then-blur sequence from firing the same save twice.
+    el.querySelectorAll("[data-inv-edit]").forEach((btn) => {
+      btn.onclick = () => {
+        const id = btn.dataset.invEdit;
+        const textEl = el.querySelector(`[data-inv-text="${id}"]`);
+        const item = state.inventory.find((r) => String(r.id) === String(id));
+        if (!textEl || !item) return;
+        const original = item.item_name;
+        textEl.outerHTML = `<input type="text" data-inv-text="${id}" value="${esc(original)}">`;
+        const input = el.querySelector(`input[data-inv-text="${id}"]`);
+        input.focus();
+        input.select();
+        let done = false;
+        const save = guard(async () => {
+          if (done) return;
+          done = true;
+          const val = input.value.trim();
+          if (!val || val === original) { renderInventoryGroups(); return; }
+          await Dinero.db("inventory_items").update({ item_name: val }, { id: "eq." + id });
+          await loadInventory();
+          renderInventoryGroups();
+        });
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") { e.preventDefault(); save(); }
+          if (e.key === "Escape") { e.preventDefault(); if (!done) { done = true; renderInventoryGroups(); } }
+        });
+        input.addEventListener("blur", () => save());
+      };
     });
   }
 

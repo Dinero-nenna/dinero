@@ -254,12 +254,17 @@
   ul.shoplist { list-style: none; margin: 0 0 20px; padding: 0; }
   ul.shoplist li {
     border-bottom: 1px solid var(--line); padding: 10px 2px; display: flex; align-items: center;
-    gap: 10px; font-size: 0.9rem;
+    gap: 10px; font-size: 0.9rem; flex-wrap: wrap;
   }
   ul.shoplist li.have { opacity: 0.5; }
   ul.shoplist li input[type=checkbox] { accent-color: var(--accent); width: 17px; height: 17px; }
   ul.shoplist li span.have-tag { margin-left: auto; font-size: 0.7rem; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; }
   ul.shoplist li button.remove { margin-left: auto; width: auto; border: none; background: none; color: var(--ink-soft); font-size: 1rem; cursor: pointer; line-height: 1; padding: 0; }
+  ul.shoplist li button.staple-btn {
+    margin-left: auto; width: auto; padding: 5px 10px; border: 1px solid var(--accent); border-radius: var(--radius);
+    background: transparent; color: var(--accent); font-family: var(--sans); font-size: 0.72rem;
+    cursor: pointer; white-space: nowrap;
+  }
 
   .inv-group { margin-bottom: 18px; }
   .inv-group h4 { margin: 0 0 8px; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); }
@@ -269,6 +274,10 @@
     padding: 6px 8px 6px 12px; font-size: 0.82rem; display: flex; align-items: center; gap: 8px;
   }
   .inv-chip button { width: auto; margin: 0; border: none; background: none; color: var(--ink-soft); font-size: 0.9rem; cursor: pointer; padding: 0; }
+  .inv-chip input[type=text] {
+    width: 160px; max-width: 45vw; padding: 2px 4px; border: none; border-bottom: 1px solid var(--accent);
+    background: transparent; font-size: 0.82rem; font-family: var(--sans); color: var(--ink);
+  }
   .inv-empty { font-style: italic; color: var(--ink-soft); font-size: 0.9rem; padding: 4px 0 18px; }
   .inv-add-row { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
   .inv-add-row input, .inv-add-row select { width: auto; flex: 1; min-width: 140px; }
