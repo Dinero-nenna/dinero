@@ -724,11 +724,11 @@
 
           <label for="ob-dinners">Hvor mange hverdagsmiddager lager dere selv? (1–5)</label>
           <input id="ob-dinners" type="number" min="1" max="5" value="${esc(household.active_dinners_per_week != null ? household.active_dinners_per_week : 5)}">
-          <div class="hint">Resten av hverdagene fylles med GodtLevert (om dere bruker det) eller står åpne for pizza/takeout/rester.</div>
+          <div class="hint">Resten av hverdagene fylles med matkasse (om dere bruker det) eller står åpne for pizza/takeout/rester.</div>
 
           <div class="checkbox-row">
             <input type="checkbox" id="ob-godtlevert" ${household.uses_godtlevert ? "checked" : ""}>
-            <label for="ob-godtlevert">Vi bruker GodtLevert eller lignende middagslevering</label>
+            <label for="ob-godtlevert">Vi bruker fast matkasse (GodtLevert, HelloFresh e.l.)</label>
           </div>
           <div id="ob-godtlevert-days" style="display:${household.uses_godtlevert ? "block" : "none"};">
             <label>Hvilke dager?</label>
@@ -762,6 +762,10 @@
           </div>
 
           <button id="ob-submit">Lagre og fortsett</button>
+          ${!opts.firstTime ? `
+          <button type="button" class="secondary" id="ob-regen-all" style="margin-top:10px;">Regenerer alt (middager + matpakke, alle uker)</button>
+          <div class="hint">Lagrer innstillingene og bytter deretter ut ALLE middager og matpakker for denne uken, neste uke og uken etter — inkludert eventuelle enkeltbytter du har gjort i mellomtiden. Det du selv har lagt til på handlelisten ("Legg til noe selv") blir ikke påvirket.</div>
+          ` : ""}
           <div class="error" id="ob-error"></div>
         </div>`;
 
@@ -781,6 +785,35 @@
       };
 
       document.getElementById("ob-submit").onclick = () => submit();
+      const regenAllBtn = document.getElementById("ob-regen-all");
+      if (regenAllBtn) regenAllBtn.onclick = () => regenerateAllAndSave();
+    }
+
+    // Shared by submit() and regenerateAllAndSave() — reads every form field into the
+    // household patch shape the DB expects. Extracted (2026-09-08, her request: "en knapp i
+    // instillinger der man kan klikke regenerer alt") so "Regenerer alt" can save the same
+    // values as the normal submit button before regenerating, without duplicating field reads.
+    function buildPatchFromForm() {
+      const adults = Math.max(1, Math.min(10, Number(document.getElementById("ob-adults").value) || 1));
+      const activeDinners = Math.max(1, Math.min(5, Number(document.getElementById("ob-dinners").value) || 5));
+      const usesGodtlevert = document.getElementById("ob-godtlevert").checked;
+      const godtlevertDays = usesGodtlevert
+        ? Array.from(container.querySelectorAll('input[name="glday"]:checked')).map((el) => el.value)
+        : [];
+      return {
+        adults: adults,
+        children: readChildrenFromDom(),
+        active_dinners_per_week: activeDinners,
+        uses_godtlevert: usesGodtlevert,
+        godtlevert_days: godtlevertDays,
+        cuisine_preferences: document.getElementById("ob-cuisine").value.trim(),
+        vegetar: document.getElementById("ob-vegetar").checked,
+        allergies: document.getElementById("ob-allergies").value.trim(),
+        matpakke_enabled: document.getElementById("ob-matpakke").checked,
+        bake_day: document.getElementById("ob-bakedag").value,
+        matpakke_preferences: document.getElementById("ob-matpakke-prefs").value.trim(),
+        onboarding_completed: true,
+      };
     }
 
     function readChildrenFromDom() {
@@ -815,26 +848,7 @@
     async function submit() {
       const errEl = document.getElementById("ob-error");
       errEl.style.display = "none";
-      const adults = Math.max(1, Math.min(10, Number(document.getElementById("ob-adults").value) || 1));
-      const activeDinners = Math.max(1, Math.min(5, Number(document.getElementById("ob-dinners").value) || 5));
-      const usesGodtlevert = document.getElementById("ob-godtlevert").checked;
-      const godtlevertDays = usesGodtlevert
-        ? Array.from(container.querySelectorAll('input[name="glday"]:checked')).map((el) => el.value)
-        : [];
-      const patch = {
-        adults: adults,
-        children: readChildrenFromDom(),
-        active_dinners_per_week: activeDinners,
-        uses_godtlevert: usesGodtlevert,
-        godtlevert_days: godtlevertDays,
-        cuisine_preferences: document.getElementById("ob-cuisine").value.trim(),
-        vegetar: document.getElementById("ob-vegetar").checked,
-        allergies: document.getElementById("ob-allergies").value.trim(),
-        matpakke_enabled: document.getElementById("ob-matpakke").checked,
-        bake_day: document.getElementById("ob-bakedag").value,
-        matpakke_preferences: document.getElementById("ob-matpakke-prefs").value.trim(),
-        onboarding_completed: true,
-      };
+      const patch = buildPatchFromForm();
       const btn = document.getElementById("ob-submit");
       btn.disabled = true;
       try {
@@ -850,6 +864,50 @@
         } else if (typeof opts.onDone === "function") {
           opts.onDone(updated);
         }
+      } catch (e) {
+        errEl.textContent = errMsg(e);
+        errEl.style.display = "block";
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    // "Regenerer alt" (her request, 2026-09-08: going through Middager+Matpakke, per week, to
+    // apply a settings change was "litt tungvindt"). Saves the current form the same way
+    // submit() does, then regenerates ALL SIX week/category buckets (denne/neste/uken etter ×
+    // middager/matpakke) in one go instead of making her click "Regenerer" six separate times.
+    // Deliberately does NOT touch shopping_list_items directly — regenerateDinnerWeek()/
+    // regenerateMatpakkeWeek() only ever rewrite week_plan_slots; the shopping list's own
+    // reconciliation (syncAutoShoppingItems(), run automatically whenever the Handleliste tab
+    // is opened) explicitly only touches is_manual=false rows, so anything she's added herself
+    // via "Legg til noe selv" is never touched by this button either.
+    async function regenerateAllAndSave() {
+      const errEl = document.getElementById("ob-error");
+      errEl.style.display = "none";
+      const ok = confirm(
+        "Dette lagrer innstillingene og bytter ut ALLE middager og matpakker for denne uken, neste uke og uken etter — også eventuelle enkeltbytter du har gjort. Det du selv har lagt til på handlelisten blir ikke påvirket. Fortsette?"
+      );
+      if (!ok) return;
+      const btn = document.getElementById("ob-regen-all");
+      if (btn) btn.disabled = true;
+      try {
+        const patch = buildPatchFromForm();
+        const rows = await Dinero.db("households").update(patch, { id: "eq." + household.id });
+        const updated = (rows && rows[0]) ? rows[0] : Object.assign({}, household, patch);
+        // generateDinnerPlanRows()/generateMatpakkePlanRows() (called inside the two
+        // regenerate*Week() helpers below) read settings from state.household, not from this
+        // closure's `household` — must update it BEFORE regenerating or the old settings would
+        // still be used, defeating the whole point of this button.
+        state.household = updated;
+        for (const wk of WEEK_KEYS) {
+          await regenerateDinnerWeek(wk);
+        }
+        if (updated.matpakke_enabled !== false) {
+          for (const wk of WEEK_KEYS) {
+            await regenerateMatpakkeWeek(wk);
+          }
+        }
+        if (typeof opts.onDone === "function") opts.onDone(updated);
       } catch (e) {
         errEl.textContent = errMsg(e);
         errEl.style.display = "block";
@@ -1102,8 +1160,8 @@
         body: "Å lagre nye innstillinger (allergier, preferanser, antall middager …) endrer ikke en uke som allerede er planlagt. «Regenerer middagene»/«Regenerer matpakkene» lager nye forslag for den uken basert på det du nettopp lagret.",
       },
       {
-        title: "GodtLevert-dagene dine holder seg faste",
-        body: "Dagene du har satt opp med GodtLevert blir alltid stående, uansett hvor mange middager du ellers har valgt å lage selv.",
+        title: "Matkasse-dagene dine holder seg faste",
+        body: "Dagene du har satt opp med matkasse blir alltid stående, uansett hvor mange middager du ellers har valgt å lage selv.",
       },
       {
         title: "Handlelisten fylles automatisk — men bare fra middagene",
@@ -1279,7 +1337,7 @@
     dayList.innerHTML = dinnerAndFlexSlots.map((slot) => {
       if (slot.slot_type === "godtlevert") {
         return `<div class="day-row"><div class="day-label">${slot.day_label}</div>
-          <div class="dish-card godtlevert"><div class="card-title-row"><h3 class="godtlevert-tag">GodtLevert</h3></div></div></div>`;
+          <div class="dish-card godtlevert"><div class="card-title-row"><h3 class="godtlevert-tag">Matkasse</h3></div></div></div>`;
       }
       if (slot.slot_type === "flex") {
         if (!slot.item_id) {
