@@ -208,15 +208,24 @@
       display: flex; align-items: center; justify-content: center;
       border-radius: 999px; transition: background-color 0.15s;
     }
-    nav.bottom-tabs button.active { color: var(--accent); }
-    nav.bottom-tabs button.active .bt-icon { background: rgba(107, 42, 26, 0.22); }
+    /* Active-tab marking made noticeably darker/stronger (2026-09-08, her request: "når man
+       er på middager bør den være mørkere" — the previous rgba(...,0.22) tint plus the accent
+       label color together still read as too subtle). Bumped the icon-pill alpha way up
+       (0.22 → 0.55, a clearly darker rosy-brown circle, not just a faint tint) and made the
+       active label bold on top of its already-darker accent color, so the two together are
+       unambiguous at a glance. */
+    nav.bottom-tabs button.active { color: var(--accent); font-weight: 700; }
+    nav.bottom-tabs button.active .bt-icon { background: rgba(107, 42, 26, 0.55); }
 
     /* Week-switcher pills (Denne uken / Neste uke / Uken etter) fill the screen width on
-       mobile instead of staying pinned to their fitted desktop width (2026-09-07, her
-       request: "de tre knappene ... bør fylle større deler av skjermen"), with bigger
-       padding/text so they're easier to tap too. */
-    .week-switcher { width: 100%; }
-    .week-switcher button { flex: 1; padding: 13px 6px; font-size: 0.88rem; }
+       mobile instead of staying pinned to their fitted desktop width. First pass 2026-09-07;
+       she asked again 2026-09-08 ("kanskje de tre knappene ... også bør fylle større deler av
+       skjermen") so this round makes the size bump considerably more noticeable — taller
+       (16px vertical padding, was 13px) and bigger text (0.95rem, was 0.88rem), on top of the
+       full-width/equal-flex fix from before, so the pills now visibly take up much more of the
+       screen, not just technically span its width. */
+    .week-switcher { width: 100%; margin-bottom: 20px; }
+    .week-switcher button { flex: 1; padding: 16px 6px; font-size: 0.95rem; }
   }
 
   .day-row { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
