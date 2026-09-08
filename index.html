@@ -168,28 +168,34 @@
      just inline before the uppercase label instead of stacked above a smaller label. */
   nav.tabs button .t-icon { margin-right: 7px; font-size: 0.92rem; }
 
-  /* -- bottom tab bar: hidden on desktop, replaces nav.tabs on narrow (phone) widths -- */
+  /* -- icon tab bar: hidden on desktop (plain nav.tabs is used there instead), replaces
+     nav.tabs on narrow (phone) widths. Named/id'd "bottom-tabs" from when it first shipped
+     fixed to the screen's bottom edge (2026-09-07) — kept that name on the 2026-09-08 move to
+     avoid touching unrelated CSS/JS references; it no longer sits at the bottom. -- */
   nav.bottom-tabs { display: none; }
   @media (max-width: 640px) {
     header { padding: 18px 16px 12px; }
     h1 { font-size: 1.55rem; }
-    main { padding: 20px 14px 108px; }
+    main { padding: 20px 14px 24px; }
     nav.tabs { display: none; }
-    /* Floating "lifted" bar (2026-09-07, her request: bottom icons were still "vanskelig å se"
-       after the first size/color pass — the accent-soft pill barely showed against the white
-       bar itself). Two changes together: (1) the bar now floats with a side/bottom margin and
-       rounded corners plus a real drop-shadow instead of sitting flush against the screen edge
-       with only a hairline top border — an actual "lift" off the page, not just a bigger icon.
-       (2) the active icon's pill background is now a visibly tinted rgba(accent) instead of the
-       near-white --accent-soft token, which measured almost the same lightness as the white bar
-       behind it. */
+    /* MOVED TO THE TOP OF THE SCREEN (2026-09-08, her clarification: "jeg mente at boksen bør
+       løftes øverst på skjermen; over der det står denne uken, neste uke og uken etter" — the
+       09-07 "floating/elevated bar at the bottom" round answered the wrong half of "løftet";
+       she meant literal position, not just a raised drop-shadow). Dropped `position: fixed` and
+       the bottom/side-margin floating-card treatment entirely — this now renders in normal
+       document flow, in the exact spot `nav.tabs` occupies on desktop (see the matching HTML
+       move in showApp() in app.js: this element is now BEFORE #app-main, not after), so it
+       sits right above the week-switcher pills (and everything else in the active tab) instead
+       of overlaying the bottom of the screen. `main`'s bottom padding above is back down from
+       108px to a plain 24px since nothing fixed-position needs clearance anymore. Kept the
+       rounded-card look + shadow (now reads as "elevated card at the top" rather than
+       "floating dock at the bottom") and the same bigger icon + visibly-tinted active pill from
+       the two prior rounds — those parts were working fine, only the position was wrong. */
     nav.bottom-tabs {
       display: flex;
-      position: fixed; left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom));
-      z-index: 40;
-      background: var(--card); border: 1px solid var(--line); border-radius: 18px;
-      padding: 5px 4px;
-      box-shadow: 0 6px 20px rgba(34,31,27,0.14), 0 2px 6px rgba(34,31,27,0.08);
+      background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+      padding: 5px 4px; margin-bottom: 18px;
+      box-shadow: 0 2px 10px rgba(34,31,27,0.07);
     }
     nav.bottom-tabs button {
       flex: 1; width: auto; margin: 2px 3px; background: none; border: none; border-radius: 10px;

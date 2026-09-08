@@ -981,8 +981,15 @@
       </div>
       <div id="app-banner"></div>
       <nav class="tabs" id="app-tabs"></nav>
-      <div id="app-main"><div class="hint">Laster …</div></div>
+      <!-- Moved here, above #app-main, 2026-09-08 (her clarification: "løftes øverst på
+           skjermen; over der det står denne uken, neste uke og uken etter" — she meant the
+           icon nav should sit at the TOP of the screen, above the week-switcher pills inside
+           each tab, not just a raised/floating bar still anchored to the bottom). Element id/
+           class are unchanged ("bottom-tabs"/"app-bottom-tabs") to avoid touching CSS
+           selectors and JS lookups elsewhere that key off them — the name is now a bit stale,
+           but harmless; see the CSS comment by nav.bottom-tabs for the positioning change. -->
       <nav class="bottom-tabs" id="app-bottom-tabs"></nav>
+      <div id="app-main"><div class="hint">Laster …</div></div>
     `;
 
     document.getElementById("app-logout-btn").onclick = () => { if (window.doLogout) window.doLogout(); };
