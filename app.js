@@ -763,6 +763,11 @@
           <div class="hint">Lagrer innstillingene og bytter deretter ut ALLE middager og matpakker for denne uken, neste uke og uken etter — inkludert eventuelle enkeltbytter du har gjort i mellomtiden. Det du selv har lagt til på handlelisten ("Legg til noe selv") blir ikke påvirket.</div>
           ` : ""}
           <div class="error" id="ob-error"></div>
+          ${!opts.firstTime ? `
+          <div style="margin-top:22px; padding-top:14px; border-top:1px solid var(--line); text-align:center;">
+            <a id="ob-logout-link" style="font-size:0.8rem; color:var(--ink-soft); cursor:pointer; text-decoration:underline;">Logg ut</a>
+          </div>
+          ` : ""}
         </div>`;
 
       renderChildrenBlock();
@@ -789,6 +794,11 @@
       // ORIGINAL, unmodified `household` object — no DB call at all, so nothing is saved.
       const cancelBtn = document.getElementById("ob-cancel");
       if (cancelBtn) cancelBtn.onclick = () => { if (typeof opts.onDone === "function") opts.onDone(household); };
+      // "Logg ut" (2026-09-09, her request: moved out of the in-app topbar into here, tucked
+      // at the bottom of the settings panel). Only shown when re-opening settings later (not
+      // during mandatory first-time onboarding) — same guard as "Lukk" above.
+      const logoutLink = document.getElementById("ob-logout-link");
+      if (logoutLink) logoutLink.onclick = () => { if (window.doLogout) window.doLogout(); };
     }
 
     // Shared by submit() and regenerateAllAndSave() — reads every form field into the
@@ -972,13 +982,6 @@
     state.showRecipeForm = false;
 
     container.innerHTML = `
-      <div class="app-topbar">
-        <div class="household-name">${esc(household.name || "Min husstand")}</div>
-        <div class="app-topbar-actions">
-          <a id="app-settings-link">Innstillinger</a>
-          <button id="app-logout-btn">Logg ut</button>
-        </div>
-      </div>
       <div id="app-banner"></div>
       <nav class="tabs" id="app-tabs"></nav>
       <!-- Moved here, above #app-main, 2026-09-08 (her clarification: "løftes øverst på
@@ -992,8 +995,21 @@
       <div id="app-main"><div class="hint">Laster …</div></div>
     `;
 
-    document.getElementById("app-logout-btn").onclick = () => { if (window.doLogout) window.doLogout(); };
-    document.getElementById("app-settings-link").onclick = () => openSettings();
+    // The dedicated in-app "topbar" (household name + Innstillinger/Logg ut) was removed
+    // 2026-09-09, her request ("det ser litt for enkelt ut" feedback round — the household
+    // name repeated what's now shown right under "Dinero" in the page header, and she asked
+    // for Innstillinger/Logg ut to live elsewhere). Innstillinger is now the small gear icon
+    // in that page header (#header-settings-btn, markup lives in index.html since the header
+    // is outside #appView — hidden by default there, shown + wired here since it's only
+    // relevant once a household is actually logged in); Logg ut moved into the settings panel
+    // itself (see "ob-logout-link" in showOnboarding()'s render()).
+    const subtitleEl = document.getElementById("app-subtitle");
+    if (subtitleEl) subtitleEl.textContent = `${household.name || "Familien"} sin matplanlegger`;
+    const settingsBtn = document.getElementById("header-settings-btn");
+    if (settingsBtn) {
+      settingsBtn.style.display = "inline-flex";
+      settingsBtn.onclick = () => openSettings();
+    }
 
     let rolled = false;
     try {
@@ -1292,14 +1308,19 @@
   }
 
   function renderMiddager(main) {
+    // The 👍/👎-explainer hint and "+ Legg til oppskrift" toggle used to sit right at the top,
+    // between the week-switcher and the actual day list — 2026-09-09, her request ("det
+    // forstyrrer at det forklarer tommel opp og ned og at man kan legge til oppskrift") moved
+    // both BELOW the day list instead, so the week you land on shows its dinners first, not
+    // explanatory text and a form toggle. Nothing here changed functionally, only order.
     main.innerHTML = `
       ${weekSwitcherHtml()}
-      <div class="hint">👍/👎 og det du har hjemme påvirker hvilke retter "Bytt ut" plukker oftere framover — ikke bare her og nå.</div>
+      <div id="day-list"></div>
+      <div class="hint" style="margin-top:18px;">👍/👎 og det du har hjemme påvirker hvilke retter "Bytt ut" plukker oftere framover — ikke bare her og nå.</div>
       <div class="row-actions" style="margin-bottom:14px;">
         <button class="small-btn" id="recipe-toggle-btn">${state.showRecipeForm ? "Skjul oppskrift-skjema" : "+ Legg til oppskrift"}</button>
       </div>
       ${state.showRecipeForm ? recipeFormSectionHtml() : ""}
-      <div id="day-list"></div>
     `;
     bindWeekSwitcher(main, () => renderMiddager(main));
     // "Regenerer middagene for «uken»" (per-week/per-tab regenerate) removed 2026-09-07, her
@@ -1606,9 +1627,10 @@
   }
 
   function renderMatpakke(main) {
+    // "Matpakker" subhead removed 2026-09-09, her request — redundant with the fact that
+    // you're already on the Matpakke tab (icon nav right above already says so).
     main.innerHTML = `
       ${weekSwitcherHtml()}
-      <div class="subhead">Matpakker</div>
       <div class="hint">👍/👎 påvirker hvilke matpakker "Bytt ut" plukker oftere framover — og allergier/preferanser fra innstillingene dine påvirker alle forslagene.</div>
       <div style="overflow-x:auto;">
         <table class="matpakke">

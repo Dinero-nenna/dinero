@@ -33,6 +33,7 @@
     padding: 28px 20px 18px;
     border-bottom: 1px solid var(--line);
     text-align: center;
+    position: relative;
   }
   h1 {
     font-family: var(--serif);
@@ -42,6 +43,23 @@
     margin: 0;
   }
   .subtitle { color: var(--ink-soft); font-size: 0.9rem; margin-top: 4px; }
+  /* -- small icon-style button, used for the settings gear tucked into the header corner -- */
+  .icon-btn {
+    position: absolute;
+    top: 26px;
+    right: 20px;
+    width: auto;
+    margin: 0;
+    padding: 7px 11px;
+    background: transparent;
+    color: var(--ink-soft);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 1.05rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .icon-btn:hover { opacity: 1; border-color: var(--accent); color: var(--accent); }
 
   main { max-width: 420px; margin: 0 auto; padding: 40px 20px; }
 
@@ -118,23 +136,11 @@
 
   main { max-width: 760px; }
 
-  /* -- top bar: household name + settings/logout, shown above the tab nav -- */
-  .app-topbar {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    padding-bottom: 14px;
-    margin-bottom: 4px;
-    flex-wrap: wrap;
-  }
-  .app-topbar .household-name { font-family: var(--serif); font-style: italic; font-size: 1.3rem; }
-  .app-topbar-actions { display: flex; gap: 14px; align-items: center; font-size: 0.85rem; }
-  .app-topbar-actions a { color: var(--accent); cursor: pointer; text-decoration: underline; }
-  .app-topbar-actions button {
-    width: auto; margin: 0; padding: 6px 12px; font-size: 0.8rem;
-    background: transparent; color: var(--ink-soft); border: 1px solid var(--line);
-  }
+  /* -- in-app topbar (household name + Innstillinger/Logg ut) removed 2026-09-09, her request
+     — it repeated the household name now shown under "Dinero" in the page header, and she
+     wanted Innstillinger/Logg ut elsewhere. See the "icon-btn" rule above (settings gear, in
+     the page header) and showOnboarding()'s "ob-logout-link" in app.js (Logg ut, inside the
+     settings panel) for where they live now. -- */
 
   /* -- tab nav (ported 1:1 from the prototype) -- */
   nav.tabs {
@@ -176,6 +182,7 @@
   @media (max-width: 640px) {
     header { padding: 18px 16px 12px; }
     h1 { font-size: 1.55rem; }
+    .icon-btn { top: 15px; right: 12px; padding: 6px 9px; font-size: 0.95rem; }
     main { padding: 20px 14px 24px; }
     nav.tabs { display: none; }
     /* MOVED TO THE TOP OF THE SCREEN (2026-09-08, her clarification: "jeg mente at boksen bør
@@ -220,12 +227,24 @@
     /* Week-switcher pills (Denne uken / Neste uke / Uken etter) fill the screen width on
        mobile instead of staying pinned to their fitted desktop width. First pass 2026-09-07;
        she asked again 2026-09-08 ("kanskje de tre knappene ... også bør fylle større deler av
-       skjermen") so this round makes the size bump considerably more noticeable — taller
-       (16px vertical padding, was 13px) and bigger text (0.95rem, was 0.88rem), on top of the
-       full-width/equal-flex fix from before, so the pills now visibly take up much more of the
-       screen, not just technically span its width. */
+       skjermen") so that round made the bump considerably more noticeable (16px padding,
+       0.95rem text). She asked again 2026-09-09 ("enda større så de fyller plassen" /
+       "la denne uke, neste uke og uken etter fylle hele plassen" — this time also explicitly
+       for the Matpakke tab, which already got this for free since both tabs share this same
+       .week-switcher markup/CSS). Third-round bump: 20px vertical padding (was 16px), 1.05rem
+       text (was 0.95rem).  */
     .week-switcher { width: 100%; margin-bottom: 20px; }
-    .week-switcher button { flex: 1; padding: 16px 6px; font-size: 0.95rem; }
+    .week-switcher button { flex: 1; padding: 20px 6px; font-size: 1.05rem; }
+
+    /* Matpakke table: 👍/👎/Bytt-ut/Vis-oppskrift button group made to fill the row's full
+       width too (2026-09-09, her request: "samme med tommel opp tommel ned" — same treatment
+       as the week-switcher pills above). The table itself is untouched (still wrapped in its
+       own overflow-x:auto div in renderMatpakke(), so it still scrolls horizontally if needed)
+       — only the inner button-group div inside each .bake-cell is forced onto its own
+       full-width row, with its buttons each growing to fill that row evenly, instead of
+       staying a cramped inline cluster next to the dish name. */
+    table.matpakke .bake-cell > div { flex: 1 1 100%; display: flex; gap: 6px; }
+    table.matpakke .bake-cell > div button { flex: 1; padding: 9px 4px; font-size: 0.82rem; }
   }
 
   .day-row { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
@@ -386,7 +405,16 @@
 
 <header>
   <h1>Dinero</h1>
-  <div class="subtitle">Familiens middagsplanlegger</div>
+  <div class="subtitle" id="app-subtitle">Familiens middagsplanlegger</div>
+  <!-- Settings gear (2026-09-09, her request: "Kan Innstillinger og Logg ut stå annet sted?" —
+       felt cluttered sitting on every screen next to the repeated household name). Hidden by
+       default (only relevant once logged in); app.js's showApp() reveals + wires it once a
+       household loads, and also personalizes the subtitle above to "<household> sin
+       matplanlegger" instead of the generic line, so the household name is only shown here now,
+       not also repeated in its own in-app topbar. "Logg ut" moved into the settings panel
+       itself (see the "ob-logout-link" in showOnboarding()'s render() in app.js) rather than
+       living up here too. -->
+  <button type="button" class="icon-btn" id="header-settings-btn" title="Innstillinger" aria-label="Innstillinger" style="display:none;">⚙️</button>
 </header>
 
 <main>
