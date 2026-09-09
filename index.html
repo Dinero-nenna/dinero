@@ -227,7 +227,11 @@
        active label bold on top of its already-darker accent color, so the two together are
        unambiguous at a glance. */
     nav.bottom-tabs button.active { color: var(--accent); font-weight: 700; }
-    nav.bottom-tabs button.active .bt-icon { background: rgba(107, 42, 26, 0.55); }
+    /* color:#fff added 2026-09-09 — spotted while checking the new line icons: the icon is
+       currentColor (var(--accent) here), sitting on a background that's the SAME accent color
+       at 55% alpha, so a same-hued icon nearly disappeared into its own pill. White gives it
+       real contrast; the bold accent-colored label underneath still reads as "active" too. */
+    nav.bottom-tabs button.active .bt-icon { background: rgba(107, 42, 26, 0.55); color: #fff; }
 
     /* Week-switcher pills (Denne uken / Neste uke / Uken etter) fill the screen width on
        mobile instead of staying pinned to their fitted desktop width. First pass 2026-09-07;
