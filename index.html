@@ -236,15 +236,39 @@
     .week-switcher { width: 100%; margin-bottom: 20px; }
     .week-switcher button { flex: 1; padding: 20px 6px; font-size: 1.05rem; }
 
-    /* Matpakke table: 👍/👎/Bytt-ut/Vis-oppskrift button group made to fill the row's full
-       width too (2026-09-09, her request: "samme med tommel opp tommel ned" — same treatment
-       as the week-switcher pills above). The table itself is untouched (still wrapped in its
-       own overflow-x:auto div in renderMatpakke(), so it still scrolls horizontally if needed)
-       — only the inner button-group div inside each .bake-cell is forced onto its own
-       full-width row, with its buttons each growing to fill that row evenly, instead of
-       staying a cramped inline cluster next to the dish name. */
-    table.matpakke .bake-cell > div { flex: 1 1 100%; display: flex; gap: 6px; }
-    table.matpakke .bake-cell > div button { flex: 1; padding: 9px 4px; font-size: 0.82rem; }
+    /* Matpakke table → stacked cards on mobile (2026-09-09, her request: "la denne uke, neste
+       uke og uken etter fylle hele plassen og samme med tommel opp tommel ned" for the Matpakke
+       tab). A first pass just widened the buttons *within* their existing narrow "Matpakke"
+       table column — still cramped, since a 4-column table only gives that column a quarter of
+       the screen. This instead turns each day's <tr> into its own full-width card (same
+       document, same data-* attributes app.js binds click handlers to — only the layout
+       changes): dag/matpakke/tilbehør/handleliste stack top-to-bottom, each still labeled (via
+       the data-label attributes app.js now puts on every <td>, read here through ::before/
+       attr()), and the 👍/👎/Bytt ut/Vis oppskrift button row spans the card's full width with
+       each button growing evenly — genuinely "fyller plassen" now, not just technically wider.
+       Desktop is untouched (this is all inside the existing max-width:640px block); the table
+       still sits in its own overflow-x:auto wrapper from renderMatpakke() either way. */
+    table.matpakke { border: none; background: none; }
+    table.matpakke thead { display: none; }
+    table.matpakke, table.matpakke tbody, table.matpakke tr, table.matpakke td { display: block; width: 100%; }
+    table.matpakke tr {
+      background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+      margin-bottom: 12px; overflow: hidden; box-shadow: var(--shadow-card);
+    }
+    table.matpakke tr.recipe-row {
+      margin-top: -12px; border-top: none; border-radius: 0 0 var(--radius) var(--radius);
+    }
+    table.matpakke td { border-bottom: 1px solid var(--line); padding: 10px 14px; }
+    table.matpakke tr td:last-child { border-bottom: none; }
+    table.matpakke td[data-label]::before {
+      content: attr(data-label); display: block; font-size: 0.68rem; color: var(--ink-soft);
+      text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;
+    }
+    table.matpakke td[data-label="Dag"] { font-family: var(--serif); font-style: italic; font-size: 1rem; }
+    table.matpakke td[data-label="Dag"]::before { display: none; }
+    table.matpakke .bake-cell { flex-direction: column; align-items: stretch; gap: 10px; }
+    table.matpakke .bake-cell > div { width: 100%; display: flex; gap: 6px; }
+    table.matpakke .bake-cell > div button { flex: 1; padding: 10px 4px; font-size: 0.85rem; }
   }
 
   .day-row { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }

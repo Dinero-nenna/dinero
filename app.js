@@ -1659,21 +1659,26 @@
     if (!body) return; // Matpakke tab isn't the one currently on screen — nothing to do
     body.innerHTML = rows.map((r) => {
       const slot = slotFor(r.day, r.bake ? "bakst" : "matpakke", weekKey);
-      if (!slot) return `<tr><td>${r.label}</td><td colspan="3" class="hint">Ikke satt opp ennå.</td></tr>`;
+      if (!slot) return `<tr><td data-label="Dag">${r.label}</td><td colspan="3" class="hint">Ikke satt opp ennå.</td></tr>`;
       const side = slot.side_id ? state.sides[slot.side_id] : null;
       const sideText = side ? esc((side.amount ? side.amount + " " : "") + side.item_name) : "—";
+      // data-label="…" on each <td> (2026-09-09, part of the mobile card-row rewrite below) is
+      // read via CSS ::before/attr() on narrow screens — see the ".matpakke tr" rules in
+      // index.html's mobile media query — so each stacked field still shows what it is once the
+      // table's own <thead> is hidden there. Purely cosmetic/additive; doesn't affect any of the
+      // data-swapmp/data-mpfb/etc. click-binding below, which still targets the same buttons.
       if (r.bake) {
         const item = state.bake[slot.item_id];
         const fb = state.feedbackToggle["bakst:" + slot.item_id];
-        return `<tr><td>${r.label}</td>
-          <td><div class="bake-cell"><span>${item ? esc(item.name) : "—"}</span>
+        return `<tr><td data-label="Dag">${r.label}</td>
+          <td data-label="Matpakke"><div class="bake-cell"><span>${item ? esc(item.name) : "—"}</span>
             <div style="display:flex; gap:6px; align-items:center;">
               <button class="small-btn ${fb === "up" ? "active-fb" : ""}" data-bakefb="up" data-slot="${slot.id}">👍</button>
               <button class="small-btn ${fb === "down" ? "active-fb" : ""}" data-bakefb="down" data-slot="${slot.id}">👎</button>
               <button class="small-btn" data-swapbake="${slot.id}">Bytt</button>
             </div></div></td>
-          <td>${sideText}</td>
-          <td><button class="small-btn" data-addrow="${slot.id}" data-kind="bake">Legg til</button></td></tr>`;
+          <td data-label="Tilbehør">${sideText}</td>
+          <td data-label="Handleliste"><button class="small-btn" data-addrow="${slot.id}" data-kind="bake">Legg til</button></td></tr>`;
       }
       const item = state.matpakke[slot.item_id];
       const fb = state.feedbackToggle["matpakke:" + slot.item_id];
@@ -1687,16 +1692,16 @@
           <div class="ingredients">${esc(fmtIngr(item ? item.ingredients : []))}</div>
           ${hasSteps ? `<strong>Fremgangsmåte</strong><ol>${item.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` : ""}
         </div></td></tr>` : "";
-      return `<tr><td>${r.label}</td>
-        <td><div class="bake-cell"><span>${item ? esc(item.label) : "—"}</span>
+      return `<tr><td data-label="Dag">${r.label}</td>
+        <td data-label="Matpakke"><div class="bake-cell"><span>${item ? esc(item.label) : "—"}</span>
           <div style="display:flex; gap:6px; align-items:center;">
             <button class="small-btn ${fb === "up" ? "active-fb" : ""}" data-mpfb="up" data-slot="${slot.id}">👍</button>
             <button class="small-btn ${fb === "down" ? "active-fb" : ""}" data-mpfb="down" data-slot="${slot.id}">👎</button>
             <button class="small-btn" data-swapmp="${slot.id}">Bytt ut</button>
             <button class="small-btn recipe-btn ${recipeOpen ? "open" : ""}" data-recipe="${slot.id}">${recipeOpen ? "Skjul oppskrift" : "Vis oppskrift"}</button>
           </div></div></td>
-        <td>${sideText}</td>
-        <td><button class="small-btn" data-addrow="${slot.id}" data-kind="matpakke">Legg til</button></td></tr>${recipeRow}`;
+        <td data-label="Tilbehør">${sideText}</td>
+        <td data-label="Handleliste"><button class="small-btn" data-addrow="${slot.id}" data-kind="matpakke">Legg til</button></td></tr>${recipeRow}`;
     }).join("");
 
     body.querySelectorAll("[data-swapmp]").forEach((btn) => {
