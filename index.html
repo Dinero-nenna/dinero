@@ -170,9 +170,13 @@
   }
   nav.tabs button.active { color: var(--ink); border-bottom: 2px solid var(--accent); }
   /* Reuses the bottom nav's icon set on the desktop/top tab row too (2026-09-07, her
-     request: "kan [symboldesignet nederst] brukes i større grad også øverst") — same emoji,
-     just inline before the uppercase label instead of stacked above a smaller label. */
-  nav.tabs button .t-icon { margin-right: 7px; font-size: 0.92rem; }
+     request: "kan [symboldesignet nederst] brukes i større grad også øverst") — same icon set,
+     just inline before the uppercase label instead of stacked above a smaller label. Icons
+     switched from colorful emoji to plain currentColor stroke-SVGs 2026-09-09 (her
+     self-evaluation: emoji were the only saturated multi-color elements on an otherwise calm
+     page) — see TAB_ICONS in app.js. */
+  nav.tabs button .t-icon { margin-right: 7px; display: inline-flex; align-items: center; }
+  nav.tabs button .t-icon svg { width: 15px; height: 15px; display: block; }
 
   /* -- icon tab bar: hidden on desktop (plain nav.tabs is used there instead), replaces
      nav.tabs on narrow (phone) widths. Named/id'd "bottom-tabs" from when it first shipped
@@ -211,10 +215,11 @@
       font-size: 0.66rem; font-weight: 600; cursor: pointer;
     }
     nav.bottom-tabs button .bt-icon {
-      font-size: 1.6rem; line-height: 1; width: 34px; height: 34px;
+      line-height: 1; width: 34px; height: 34px;
       display: flex; align-items: center; justify-content: center;
       border-radius: 999px; transition: background-color 0.15s;
     }
+    nav.bottom-tabs button .bt-icon svg { width: 21px; height: 21px; display: block; }
     /* Active-tab marking made noticeably darker/stronger (2026-09-08, her request: "når man
        er på middager bør den være mørkere" — the previous rgba(...,0.22) tint plus the accent
        label color together still read as too subtle). Bumped the icon-pill alpha way up
@@ -280,7 +285,11 @@
     flex: 1; background: var(--card); padding: 16px 18px; border-radius: var(--radius);
     border: 1px solid var(--line); box-shadow: var(--shadow-card);
   }
-  .dish-card.godtlevert { border-left: 4px solid var(--godtlevert); }
+  /* Faint background tint added 2026-09-09 (her self-evaluation: an all-white card with just
+     italic text on it could be mistaken for something still loading rather than a deliberate
+     "matkasse day, nothing to choose" state) — paired with the small package icon rendered
+     inline in renderDayList() (app.js). */
+  .dish-card.godtlevert { border-left: 4px solid var(--godtlevert); background: rgba(163, 117, 47, 0.07); }
   .dish-card.flex { border-left: 4px solid var(--flex); }
   .dish-card.cuisine-accent { border-left: 4px solid var(--cuisine-color, var(--line)); }
   .card-title-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
@@ -310,7 +319,10 @@
   .row-actions button[data-fb] { padding: 6px 10px; font-size: 0.9rem; line-height: 1; }
   .row-actions button.active-fb, .small-btn.active-fb { background: var(--ink); border-color: var(--ink); color: #fff; }
   .row-actions button.recipe-btn.open { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-  .godtlevert-tag { color: var(--godtlevert); font-weight: 600; font-style: italic; }
+  /* Keeps 👍/👎 together as one flex item so they wrap onto a new line as a pair, never split
+     apart (2026-09-09, her self-evaluation found 👎 landing alone under 👍 on narrow phones). */
+  .row-actions .fb-pair { display: flex; gap: 6px; }
+  .godtlevert-tag { color: var(--godtlevert); font-weight: 600; font-style: italic; display: flex; align-items: center; }
   .flex-tag { color: var(--flex); font-weight: 600; font-style: italic; }
   /* -- "Denne uken / Neste uke / Uken etter" segmented control (Middager + Matpakke tabs) -- */
   .week-switcher {
@@ -370,13 +382,35 @@
     gap: 10px; font-size: 0.9rem; flex-wrap: wrap;
   }
   ul.shoplist li.have { opacity: 0.55; }
-  ul.shoplist li input[type=checkbox] { accent-color: var(--accent); width: 17px; height: 17px; }
+  /* Custom checkbox (2026-09-09, her self-evaluation: the native browser checkbox was the one
+     control on this list that didn't match the rest of the app's rounded/pill styling — even
+     with accent-color tinting it when checked, its square shape and default focus ring still
+     read as "unstyled"). appearance:none + a hand-drawn checkmark keeps it a real, accessible
+     checkbox (still toggles via click/keyboard/screen reader) while matching the app's rounded,
+     warm-accent look. */
+  ul.shoplist li input[type=checkbox] {
+    appearance: none; -webkit-appearance: none;
+    width: 20px; height: 20px; margin: 0; flex-shrink: 0;
+    border: 1.5px solid var(--line); border-radius: 6px;
+    background: var(--card); cursor: pointer; position: relative;
+    transition: background-color .15s, border-color .15s;
+  }
+  ul.shoplist li input[type=checkbox]:checked { background: var(--accent); border-color: var(--accent); }
+  ul.shoplist li input[type=checkbox]:checked::after {
+    content: ""; position: absolute; left: 6px; top: 2px; width: 5px; height: 10px;
+    border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+  }
   ul.shoplist li span.have-tag { margin-left: auto; font-size: 0.7rem; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; }
   ul.shoplist li button.remove { margin-left: auto; width: auto; border: none; background: none; color: var(--ink-soft); font-size: 1rem; cursor: pointer; line-height: 1; padding: 0; }
+  /* Toned down from a filled/bordered pill to a plain underlined text-link (2026-09-09, her
+     self-evaluation: the pill's border+background made it visually louder than the item name
+     next to it, even at a small font-size — it's secondary/optional info, not the main content
+     of the row). Still clearly clickable (accent color + underline), just no longer shouting. */
   ul.shoplist li button.staple-btn {
-    margin-left: auto; width: auto; padding: 5px 12px; border: 1px solid var(--accent); border-radius: 999px;
-    background: var(--accent-soft); color: var(--accent); font-family: var(--sans); font-size: 0.72rem;
+    margin-left: auto; width: auto; padding: 2px 0; border: none; background: none;
+    color: var(--accent); font-family: var(--sans); font-size: 0.72rem;
     font-weight: 600; cursor: pointer; white-space: nowrap;
+    text-decoration: underline; text-underline-offset: 2px;
   }
 
   .inv-group { margin-bottom: 18px; }

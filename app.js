@@ -1120,14 +1120,28 @@
     el.innerHTML = `<div class="banner-error">${esc(msg)}</div>`;
   }
 
+  // Line icons for the tab nav (2026-09-09, her self-evaluation request — the colorful emoji
+  // icons were the only saturated, multi-color elements in an otherwise calm cream/brown/serif
+  // palette, and read as off-the-shelf rather than designed). Plain stroke icons, all
+  // stroke="currentColor" — they pick up whatever color the tab label already uses
+  // (var(--ink-soft) inactive, var(--ink) active on desktop, var(--accent) active on mobile),
+  // so no new CSS color variables were needed. Sizing lives in the .t-icon/.bt-icon CSS rules.
+  const TAB_ICONS = {
+    middager: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.6"/></svg>`,
+    matpakke: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 8V6.3a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2V8"/><rect x="3.5" y="8" width="17" height="12" rx="2.2"/><path d="M3.5 13.2h17"/></svg>`,
+    handleliste: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/><path d="M6.2 8h11.6l-1 12.2a1.5 1.5 0 0 1-1.5 1.3H8.7a1.5 1.5 0 0 1-1.5-1.3L6.2 8z"/></svg>`,
+    inventar: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 3h7"/><path d="M9.2 3v3.6L6.7 9.3A2.2 2.2 0 0 0 6 10.9V19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-8.1a2.2 2.2 0 0 0-.7-1.6l-2.5-2.7V3"/><path d="M6.3 13.5h11.4"/></svg>`,
+    hjelp: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 11.2v5.3"/><circle cx="12" cy="7.7" r="0.15" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>`,
+  };
+
   function renderTabs(container) {
     const tabs = [
-      { id: "middager", label: "Middager", icon: "🍽️" },
+      { id: "middager", label: "Middager", icon: TAB_ICONS.middager },
     ];
-    if (state.household.matpakke_enabled) tabs.push({ id: "matpakke", label: "Matpakke", icon: "🥪" });
-    tabs.push({ id: "handleliste", label: "Handleliste", icon: "🛒" });
-    tabs.push({ id: "inventar", label: "Inventar", icon: "🥫" });
-    tabs.push({ id: "hjelp", label: "Hjelp", icon: "ℹ️" });
+    if (state.household.matpakke_enabled) tabs.push({ id: "matpakke", label: "Matpakke", icon: TAB_ICONS.matpakke });
+    tabs.push({ id: "handleliste", label: "Handleliste", icon: TAB_ICONS.handleliste });
+    tabs.push({ id: "inventar", label: "Inventar", icon: TAB_ICONS.inventar });
+    tabs.push({ id: "hjelp", label: "Hjelp", icon: TAB_ICONS.hjelp });
 
     if (!tabs.some((t) => t.id === state.activeTab)) state.activeTab = "middager";
 
@@ -1261,6 +1275,9 @@
   // oppskrifter", etc. — a lightweight visual break from monotony without dish photos
   // (she explicitly didn't want images: "Takk, jeg vil ikke ha bilder").
   const CUISINE_PALETTE = ["#6b2a26", "#a3752f", "#4f6076", "#3f7ea6", "#4b7a3a", "#83507a", "#8a6d3f"];
+  // Small box/package icon shown next to "Matkasse" on godtlevert days — see the render call
+  // in renderDayList() for why (2026-09-09).
+  const GODTLEVERT_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px; margin-right:8px; flex-shrink:0;"><path d="M3.5 8.2 12 4l8.5 4.2v7.6L12 20 3.5 15.8z"/><path d="M3.5 8.2 12 12l8.5-4.2"/><path d="M12 12v8"/></svg>`;
   function cuisineColor(cuisine) {
     const s = String(cuisine || "");
     let hash = 0;
@@ -1301,8 +1318,14 @@
         <button data-swap="${slot.id}">Bytt ut</button>
         <button data-swapfast="${slot.id}" title="Bytt til en av de raskeste rettene som ikke er brukt denne uka">⚡ Rask</button>
         <button data-recipe="${slot.id}" class="recipe-btn ${recipeOpen ? "open" : ""}">${recipeOpen ? "Skjul oppskrift" : "Vis oppskrift"}</button>
-        <button data-fb="${dish.id}:up" class="${fb === "up" ? "active-fb" : ""}">👍</button>
-        <button data-fb="${dish.id}:down" class="${fb === "down" ? "active-fb" : ""}">👎</button>
+        <!-- Wrapped so 👍/👎 wrap onto a new line together, never split apart (2026-09-09, her
+             self-evaluation found this: on narrow phones the row was one button too wide, so 👎
+             alone landed on its own line under 👍 with a lot of dead space next to it). See the
+             ".row-actions .fb-pair" CSS rule. -->
+        <div class="fb-pair">
+          <button data-fb="${dish.id}:up" class="${fb === "up" ? "active-fb" : ""}">👍</button>
+          <button data-fb="${dish.id}:down" class="${fb === "down" ? "active-fb" : ""}">👎</button>
+        </div>
         ${opts.removable ? `<button data-flexremove="${slot.id}">Fjern</button>` : ""}
       </div>`;
   }
@@ -1364,8 +1387,12 @@
     if (!dayList) return; // Middager tab isn't the one currently on screen — nothing to do
     dayList.innerHTML = dinnerAndFlexSlots.map((slot) => {
       if (slot.slot_type === "godtlevert") {
+        // Small package icon + a faint background tint added 2026-09-09 (her self-evaluation:
+        // this card was otherwise just italic text on an all-white card — easy to mistake for
+        // something still loading rather than a deliberate "matkasse day, nothing to choose"
+        // state). See ".dish-card.godtlevert" / ".godtlevert-tag" in index.html for the CSS.
         return `<div class="day-row"><div class="day-label">${slot.day_label}</div>
-          <div class="dish-card godtlevert"><div class="card-title-row"><h3 class="godtlevert-tag">Matkasse</h3></div></div></div>`;
+          <div class="dish-card godtlevert"><div class="card-title-row"><h3 class="godtlevert-tag">${GODTLEVERT_ICON}Matkasse</h3></div></div></div>`;
       }
       if (slot.slot_type === "flex") {
         if (!slot.item_id) {
@@ -2116,7 +2143,15 @@
       if (!groups.has(item.category)) groups.set(item.category, []);
       groups.get(item.category).push(item);
     });
-    el.innerHTML = Array.from(groups.entries()).map(([cat, items]) => `
+    // "Annet" (catch-all/misc) sorted to the end regardless of alphabetical order (2026-09-09,
+    // her self-evaluation: it only appeared first because "A" sorts early, which felt backwards
+    // for a miscellaneous bucket — everything else stays alphabetical, in Norwegian collation).
+    const sortedGroups = Array.from(groups.entries()).sort(([a], [b]) => {
+      if (a === "Annet") return 1;
+      if (b === "Annet") return -1;
+      return a.localeCompare(b, "no");
+    });
+    el.innerHTML = sortedGroups.map(([cat, items]) => `
       <div class="inv-group">
         <h4>${esc(cat)}</h4>
         <div class="inv-items">
