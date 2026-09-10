@@ -1653,59 +1653,57 @@
     return WEEKDAY_LABELS.map((d) => ({ day: d, label: d, bake: d === bakeDay }));
   }
 
+  // Card-based layout (2026-09-10, her request: "Designet på matpakkesiden ser veldig
+  // amatøraktig ut. Kan ikke det bli likere som Middag?"). Matpakke used to be a plain <table>
+  // — flat rows, no card shell, buttons crammed into table cells with `justify-content:
+  // space-between` making them jump around depending on how long the dish name was (visibly
+  // broken on short names like "Pizzasnurrer"). This now reuses the exact same `.day-row` /
+  // `.dish-card` / `.card-title-row` / `.row-actions` / `.fb-pair` markup and CSS Middager's
+  // day list uses, just with a dedicated `--matpakke` accent color instead of Middager's
+  // per-cuisine one (matpakke_items/bake_items have no cuisine field to hash). One shell now
+  // renders identically on desktop and mobile, so the old mobile-only "table → stacked cards"
+  // CSS trick (table.matpakke's max-width:640px block) is gone too — no longer needed since
+  // the real markup is already a card list everywhere.
   function renderMatpakke(main) {
-    // "Matpakker" subhead removed 2026-09-09, her request — redundant with the fact that
-    // you're already on the Matpakke tab (icon nav right above already says so).
     main.innerHTML = `
       ${weekSwitcherHtml()}
-      <div class="hint">👍/👎 påvirker hvilke matpakker "Bytt ut" plukker oftere framover — og allergier/preferanser fra innstillingene dine påvirker alle forslagene.</div>
-      <div style="overflow-x:auto;">
-        <table class="matpakke">
-          <thead><tr><th>Dag</th><th>Matpakke</th><th>Tilbehør</th><th>Handleliste</th></tr></thead>
-          <tbody id="mp-body"></tbody>
-        </table>
-      </div>`;
+      <div id="mp-list"></div>
+      <div class="hint" style="margin-top:18px;">👍/👎 påvirker hvilke matpakker "Bytt ut" plukker oftere framover — og allergier/preferanser fra innstillingene dine påvirker alle forslagene.</div>
+    `;
     bindWeekSwitcher(main, () => renderMatpakke(main));
-    // "Matpakker (Man–Fre) — «uken»" subhead and "Regenerer matpakkene for «uken»" button both
-    // removed 2026-09-07, her request — the weekday range and the active week were already
-    // shown by the table rows and the week-switcher pills right above, and per-week regenerate
-    // felt redundant now that "Regenerer alt" lives in Innstillinger. regenerateMatpakkeWeek()
-    // itself is untouched — still called internally by regenerateAllAndSave().
     renderMatpakkeBody();
   }
 
-  // Rebuilds only #mp-body (the day-row table body), not the whole Matpakke tab — same "scoped
+  // Rebuilds only #mp-list (the day-card list), not the whole Matpakke tab — same "scoped
   // re-render" pattern as renderDayList() under Middager (see that function's comment for the
   // bug class this avoids). All row-level actions below (swap, 👍/👎, legg-til-handleliste, and
-  // the "Vis oppskrift" toggle) call this instead of the full renderMatpakke(main), so none of
-  // them has to rebuild the week-switcher/regen-button shell above the table.
+  // the "Vis oppskrift" toggle) call this instead of the full renderMatpakke(main).
   function renderMatpakkeBody() {
     const weekKey = state.activeWeek;
     const rows = matpakkeRowsForBakeDay(bakeDayLabel(state.household));
-    const body = document.getElementById("mp-body");
-    if (!body) return; // Matpakke tab isn't the one currently on screen — nothing to do
-    body.innerHTML = rows.map((r) => {
+    const list = document.getElementById("mp-list");
+    if (!list) return; // Matpakke tab isn't the one currently on screen — nothing to do
+    list.innerHTML = rows.map((r) => {
       const slot = slotFor(r.day, r.bake ? "bakst" : "matpakke", weekKey);
-      if (!slot) return `<tr><td data-label="Dag">${r.label}</td><td colspan="3" class="hint">Ikke satt opp ennå.</td></tr>`;
+      if (!slot) return `<div class="day-row"><div class="day-label">${r.label}</div><div class="dish-card matpakke-accent"><div class="hint" style="margin:0;">Ikke satt opp ennå.</div></div></div>`;
       const side = slot.side_id ? state.sides[slot.side_id] : null;
-      const sideText = side ? esc((side.amount ? side.amount + " " : "") + side.item_name) : "—";
-      // data-label="…" on each <td> (2026-09-09, part of the mobile card-row rewrite below) is
-      // read via CSS ::before/attr() on narrow screens — see the ".matpakke tr" rules in
-      // index.html's mobile media query — so each stacked field still shows what it is once the
-      // table's own <thead> is hidden there. Purely cosmetic/additive; doesn't affect any of the
-      // data-swapmp/data-mpfb/etc. click-binding below, which still targets the same buttons.
+      const sideText = side ? esc((side.amount ? side.amount + " " : "") + side.item_name) : null;
       if (r.bake) {
         const item = state.bake[slot.item_id];
         const fb = state.feedbackToggle["bakst:" + slot.item_id];
-        return `<tr><td data-label="Dag">${r.label}</td>
-          <td data-label="Matpakke"><div class="bake-cell"><span>${item ? esc(item.name) : "—"}</span>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <button class="small-btn ${fb === "up" ? "active-fb" : ""}" data-bakefb="up" data-slot="${slot.id}">👍</button>
-              <button class="small-btn ${fb === "down" ? "active-fb" : ""}" data-bakefb="down" data-slot="${slot.id}">👎</button>
-              <button class="small-btn" data-swapbake="${slot.id}">Bytt</button>
-            </div></div></td>
-          <td data-label="Tilbehør">${sideText}</td>
-          <td data-label="Handleliste"><button class="small-btn" data-addrow="${slot.id}" data-kind="bake">Legg til</button></td></tr>`;
+        return `<div class="day-row"><div class="day-label">${r.label}</div>
+          <div class="dish-card matpakke-accent">
+            <div class="card-title-row"><h3>${item ? esc(item.name) : "—"}</h3><span class="badge">Bakst</span></div>
+            ${sideText ? `<div class="tags"><span class="badge time">Tilbehør: ${sideText}</span></div>` : ""}
+            <div class="row-actions">
+              <button data-swapbake="${slot.id}">Bytt ut</button>
+              <div class="fb-pair">
+                <button data-bakefb="up" data-slot="${slot.id}" class="${fb === "up" ? "active-fb" : ""}">👍</button>
+                <button data-bakefb="down" data-slot="${slot.id}" class="${fb === "down" ? "active-fb" : ""}">👎</button>
+              </div>
+              <button data-addrow="${slot.id}" data-kind="bake">Legg til i handleliste</button>
+            </div>
+          </div></div>`;
       }
       const item = state.matpakke[slot.item_id];
       const fb = state.feedbackToggle["matpakke:" + slot.item_id];
@@ -1714,24 +1712,28 @@
       // week_plan_slots table regardless of slot_type, so there's no collision risk.
       const recipeOpen = state.openRecipes.has(slot.id);
       const hasSteps = !!(item && item.steps && item.steps.length);
-      const recipeRow = recipeOpen ? `<tr class="recipe-row"><td colspan="4"><div class="recipe-box">
-          <strong>Ingredienser</strong>
-          <div class="ingredients">${esc(fmtIngr(item ? item.ingredients : []))}</div>
-          ${hasSteps ? `<strong>Fremgangsmåte</strong><ol>${item.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` : ""}
-        </div></td></tr>` : "";
-      return `<tr><td data-label="Dag">${r.label}</td>
-        <td data-label="Matpakke"><div class="bake-cell"><span>${item ? esc(item.label) : "—"}</span>
-          <div style="display:flex; gap:6px; align-items:center;">
-            <button class="small-btn ${fb === "up" ? "active-fb" : ""}" data-mpfb="up" data-slot="${slot.id}">👍</button>
-            <button class="small-btn ${fb === "down" ? "active-fb" : ""}" data-mpfb="down" data-slot="${slot.id}">👎</button>
-            <button class="small-btn" data-swapmp="${slot.id}">Bytt ut</button>
-            <button class="small-btn recipe-btn ${recipeOpen ? "open" : ""}" data-recipe="${slot.id}">${recipeOpen ? "Skjul oppskrift" : "Vis oppskrift"}</button>
-          </div></div></td>
-        <td data-label="Tilbehør">${sideText}</td>
-        <td data-label="Handleliste"><button class="small-btn" data-addrow="${slot.id}" data-kind="matpakke">Legg til</button></td></tr>${recipeRow}`;
+      return `<div class="day-row"><div class="day-label">${r.label}</div>
+        <div class="dish-card matpakke-accent">
+          <div class="card-title-row"><h3>${item ? esc(item.label) : "—"}</h3></div>
+          ${sideText ? `<div class="tags"><span class="badge time">Tilbehør: ${sideText}</span></div>` : ""}
+          ${recipeOpen ? `<div class="recipe-box">
+            <strong>Ingredienser</strong>
+            <div class="ingredients">${esc(fmtIngr(item ? item.ingredients : []))}</div>
+            ${hasSteps ? `<strong>Fremgangsmåte</strong><ol>${item.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` : ""}
+          </div>` : ""}
+          <div class="row-actions">
+            <button data-swapmp="${slot.id}">Bytt ut</button>
+            <button data-recipe="${slot.id}" class="recipe-btn ${recipeOpen ? "open" : ""}">${recipeOpen ? "Skjul oppskrift" : "Vis oppskrift"}</button>
+            <div class="fb-pair">
+              <button data-mpfb="up" data-slot="${slot.id}" class="${fb === "up" ? "active-fb" : ""}">👍</button>
+              <button data-mpfb="down" data-slot="${slot.id}" class="${fb === "down" ? "active-fb" : ""}">👎</button>
+            </div>
+            <button data-addrow="${slot.id}" data-kind="matpakke">Legg til i handleliste</button>
+          </div>
+        </div></div>`;
     }).join("");
 
-    body.querySelectorAll("[data-swapmp]").forEach((btn) => {
+    list.querySelectorAll("[data-swapmp]").forEach((btn) => {
       btn.onclick = guard(async () => {
         const slot = state.weekSlots.find((s) => s.id === Number(btn.dataset.swapmp));
         const newId = pickAlternativeMatpakke(slot.item_id, slot.week_key);
@@ -1741,7 +1743,7 @@
         renderMatpakkeBody();
       });
     });
-    body.querySelectorAll("[data-swapbake]").forEach((btn) => {
+    list.querySelectorAll("[data-swapbake]").forEach((btn) => {
       btn.onclick = guard(async () => {
         const slot = state.weekSlots.find((s) => s.id === Number(btn.dataset.swapbake));
         const newId = pickAlternativeBake(slot.item_id);
@@ -1751,28 +1753,28 @@
         renderMatpakkeBody();
       });
     });
-    body.querySelectorAll("[data-mpfb]").forEach((btn) => {
+    list.querySelectorAll("[data-mpfb]").forEach((btn) => {
       btn.onclick = guard(async () => {
         const slot = state.weekSlots.find((s) => s.id === Number(btn.dataset.slot));
         await voteFeedback("matpakke", slot.item_id, btn.dataset.mpfb);
         renderMatpakkeBody();
       });
     });
-    body.querySelectorAll("[data-bakefb]").forEach((btn) => {
+    list.querySelectorAll("[data-bakefb]").forEach((btn) => {
       btn.onclick = guard(async () => {
         const slot = state.weekSlots.find((s) => s.id === Number(btn.dataset.slot));
         await voteFeedback("bakst", slot.item_id, btn.dataset.bakefb);
         renderMatpakkeBody();
       });
     });
-    body.querySelectorAll("[data-recipe]").forEach((btn) => {
+    list.querySelectorAll("[data-recipe]").forEach((btn) => {
       btn.onclick = () => {
         const id = Number(btn.dataset.recipe);
         if (state.openRecipes.has(id)) state.openRecipes.delete(id); else state.openRecipes.add(id);
         renderMatpakkeBody();
       };
     });
-    body.querySelectorAll("[data-addrow]").forEach((btn) => {
+    list.querySelectorAll("[data-addrow]").forEach((btn) => {
       btn.onclick = guard(async () => {
         const slot = state.weekSlots.find((s) => s.id === Number(btn.dataset.addrow));
         const source = btn.dataset.kind === "bake" ? state.bake[slot.item_id] : state.matpakke[slot.item_id];
@@ -1782,7 +1784,7 @@
         await addManualShoppingItems(items);
         btn.textContent = "✓ Lagt til";
         btn.classList.add("added");
-        setTimeout(() => { btn.textContent = "Legg til"; btn.classList.remove("added"); }, 1500);
+        setTimeout(() => { btn.textContent = "Legg til i handleliste"; btn.classList.remove("added"); }, 1500);
       });
     });
   }

@@ -17,6 +17,11 @@
     --flex: #4f6076;
     --fish: #3f7ea6;
     --veg: #4b7a3a;
+    /* Matpakke's day-card left-border accent (2026-09-10) — matpakke_items/bake_items have no
+       cuisine field to hash the way Middager's dinners do, so this is one fixed color rather
+       than Middager's per-cuisine palette. Kept close in weight/saturation to --flex/--fish so
+       it reads as part of the same family, not a jarring new hue. */
+    --matpakke: #5c7d64;
     --radius: 12px;
     --shadow-card: 0 1px 2px rgba(34,31,27,0.05), 0 1px 10px rgba(34,31,27,0.03);
     --serif: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
@@ -245,39 +250,6 @@
     .week-switcher { width: 100%; margin-bottom: 20px; }
     .week-switcher button { flex: 1; padding: 20px 6px; font-size: 1.05rem; }
 
-    /* Matpakke table → stacked cards on mobile (2026-09-09, her request: "la denne uke, neste
-       uke og uken etter fylle hele plassen og samme med tommel opp tommel ned" for the Matpakke
-       tab). A first pass just widened the buttons *within* their existing narrow "Matpakke"
-       table column — still cramped, since a 4-column table only gives that column a quarter of
-       the screen. This instead turns each day's <tr> into its own full-width card (same
-       document, same data-* attributes app.js binds click handlers to — only the layout
-       changes): dag/matpakke/tilbehør/handleliste stack top-to-bottom, each still labeled (via
-       the data-label attributes app.js now puts on every <td>, read here through ::before/
-       attr()), and the 👍/👎/Bytt ut/Vis oppskrift button row spans the card's full width with
-       each button growing evenly — genuinely "fyller plassen" now, not just technically wider.
-       Desktop is untouched (this is all inside the existing max-width:640px block); the table
-       still sits in its own overflow-x:auto wrapper from renderMatpakke() either way. */
-    table.matpakke { border: none; background: none; }
-    table.matpakke thead { display: none; }
-    table.matpakke, table.matpakke tbody, table.matpakke tr, table.matpakke td { display: block; width: 100%; }
-    table.matpakke tr {
-      background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
-      margin-bottom: 12px; overflow: hidden; box-shadow: var(--shadow-card);
-    }
-    table.matpakke tr.recipe-row {
-      margin-top: -12px; border-top: none; border-radius: 0 0 var(--radius) var(--radius);
-    }
-    table.matpakke td { border-bottom: 1px solid var(--line); padding: 10px 14px; }
-    table.matpakke tr td:last-child { border-bottom: none; }
-    table.matpakke td[data-label]::before {
-      content: attr(data-label); display: block; font-size: 0.68rem; color: var(--ink-soft);
-      text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;
-    }
-    table.matpakke td[data-label="Dag"] { font-family: var(--serif); font-style: italic; font-size: 1rem; }
-    table.matpakke td[data-label="Dag"]::before { display: none; }
-    table.matpakke .bake-cell { flex-direction: column; align-items: stretch; gap: 10px; }
-    table.matpakke .bake-cell > div { width: 100%; display: flex; gap: 6px; }
-    table.matpakke .bake-cell > div button { flex: 1; padding: 10px 4px; font-size: 0.85rem; }
   }
 
   .day-row { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
@@ -296,6 +268,7 @@
   .dish-card.godtlevert { border-left: 4px solid var(--godtlevert); background: rgba(163, 117, 47, 0.07); }
   .dish-card.flex { border-left: 4px solid var(--flex); }
   .dish-card.cuisine-accent { border-left: 4px solid var(--cuisine-color, var(--line)); }
+  .dish-card.matpakke-accent { border-left: 4px solid var(--matpakke); }
   .card-title-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .dish-card h3 { margin: 0; font-family: var(--serif); font-weight: 700; font-size: 1.14rem; }
   .badge {
@@ -360,15 +333,6 @@
 
   /* -- Oppskrifter tab: "Deres oppskrifter" list reuses .dish-card, stacked as real cards with gaps -- */
   .lib-list { display: flex; flex-direction: column; gap: 10px; }
-
-  table.matpakke {
-    width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line);
-    font-size: 0.88rem; border-radius: var(--radius); overflow: hidden;
-  }
-  table.matpakke th, table.matpakke td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-  table.matpakke th { background: var(--bg); font-size: 0.72rem; color: var(--ink-soft); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
-  table.matpakke tr:last-child td { border-bottom: none; }
-  table.matpakke .bake-cell { display: flex; align-items: center; gap: 8px; justify-content: space-between; flex-wrap: wrap; }
 
   .add-item-row { display: flex; gap: 8px; margin-bottom: 14px; }
   .add-item-row input[type=text] {
