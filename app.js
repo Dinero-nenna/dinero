@@ -1793,16 +1793,30 @@
   // HANDLELISTE
   // ================================================================================
 
-  // Ingredients from this week's dinner + flex-dinner slots, merged/deduped by name —
-  // matpakke ingredients are NOT included here, matching the prototype ("Handlelisten
-  // fylles automatisk fra middagene — ikke fra matpakke").
+  // Which week(s) feed the automatic shopping list — her request (2026-11-22): the list used
+  // to be hardcoded to just "denne" (this week), with no way to shop ahead for next week's
+  // dinners too. Persisted per household (household.shopping_weeks, jsonb array of WEEK_KEYS)
+  // so it's shared across everyone in the household, not just remembered on one device.
+  // Defaults to ["denne"] — identical to the old hardcoded behavior — for any household that
+  // hasn't touched the new checkboxes yet (including ones that predate the column).
+  function shoppingWeeks() {
+    const w = state.household && state.household.shopping_weeks;
+    return Array.isArray(w) && w.length ? w : ["denne"];
+  }
+
+  // Ingredients from the selected week(s)' dinner + flex-dinner slots, merged/deduped by name
+  // across whichever weeks are selected — matpakke ingredients are NOT included here, matching
+  // the prototype ("Handlelisten fylles automatisk fra middagene — ikke fra matpakke").
   function currentDinnerIngredients() {
-    // Deliberately hardcoded to week_key 'denne' regardless of state.activeWeek (which week
-    // tab is being browsed on the Middager screen) — you shop for the real current week, not
-    // whichever week you happen to be previewing/editing.
+    // Was deliberately hardcoded to week_key 'denne' regardless of state.activeWeek (which week
+    // tab is being browsed on the Middager screen) — "you shop for the real current week, not
+    // whichever week you happen to be previewing/editing". Now reads household.shopping_weeks
+    // instead (see shoppingWeeks() above), which she controls explicitly via checkboxes on the
+    // Handleliste tab — still completely independent of state.activeWeek.
+    const weeks = shoppingWeeks();
     const byName = new Map();
     state.weekSlots
-      .filter((s) => s.week_key === "denne" && (s.slot_type === "dinner" || s.slot_type === "flex") && s.item_id)
+      .filter((s) => weeks.includes(s.week_key) && (s.slot_type === "dinner" || s.slot_type === "flex") && s.item_id)
       .forEach((s) => {
         const dish = state.dinners[s.item_id];
         if (!dish) return;
@@ -1867,7 +1881,17 @@
   }
 
   async function renderHandleliste(main) {
+    const weeks = shoppingWeeks();
     main.innerHTML = `
+      <div class="hint" style="display:flex; flex-wrap:wrap; align-items:center; gap:14px;">
+        <span>Hent ingredienser fra:</span>
+        ${WEEK_KEYS.map((wk) => `
+          <label style="display:flex; align-items:center; gap:5px; font-weight:normal; cursor:pointer;">
+            <input type="checkbox" data-shop-week="${wk}" ${weeks.includes(wk) ? "checked" : ""}>
+            ${esc(WEEK_LABELS[wk])}
+          </label>
+        `).join("")}
+      </div>
       <div class="add-item-row">
         <input type="text" id="shop-extra-input" placeholder="Legg til noe selv, f.eks. brød, melk, pålegg …">
         <button id="shop-extra-add">Legg til</button>
@@ -1889,6 +1913,27 @@
       showBanner("app-banner", "Fikk ikke synkronisert handlelisten: " + errMsg(e));
     }
     await refreshShopList();
+
+    // ADDED (2026-11-22, her request: "legge til ingrediensene fra middager i de neste ukene
+    // ... også til i handlelisten"): lets her opt next week / the week after into the automatic
+    // shopping list, in addition to the always-available "denne uken". Saved on the household
+    // (shared across everyone in it) and re-synced immediately so the list reflects the new
+    // selection without needing to leave the tab.
+    main.querySelectorAll("[data-shop-week]").forEach((cb) => {
+      cb.onchange = guard(async () => {
+        let selected = WEEK_KEYS.filter((wk) => main.querySelector(`[data-shop-week="${wk}"]`).checked);
+        if (!selected.length) {
+          // Never allow zero weeks selected — snap back to "denne" rather than leaving the
+          // shopping list permanently empty with no obvious way to recover.
+          selected = ["denne"];
+          main.querySelector('[data-shop-week="denne"]').checked = true;
+        }
+        state.household.shopping_weeks = selected;
+        await Dinero.db("households").update({ shopping_weeks: selected }, { id: "eq." + state.household.id });
+        await syncAutoShoppingItems();
+        await refreshShopList();
+      });
+    });
 
     document.getElementById("shop-extra-add").onclick = guard(async () => {
       const input = document.getElementById("shop-extra-input");
