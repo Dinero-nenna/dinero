@@ -1883,14 +1883,16 @@
   async function renderHandleliste(main) {
     const weeks = shoppingWeeks();
     main.innerHTML = `
-      <div class="hint" style="display:flex; flex-wrap:wrap; align-items:center; gap:14px;">
-        <span>Hent ingredienser fra:</span>
-        ${WEEK_KEYS.map((wk) => `
-          <label style="display:flex; align-items:center; gap:5px; font-weight:normal; cursor:pointer;">
-            <input type="checkbox" data-shop-week="${wk}" ${weeks.includes(wk) ? "checked" : ""}>
-            ${esc(WEEK_LABELS[wk])}
-          </label>
-        `).join("")}
+      <div class="hint shop-week-picker">
+        <span class="shop-week-picker-label">Hent ingredienser fra:</span>
+        <div class="shop-week-picker-options">
+          ${WEEK_KEYS.map((wk) => `
+            <label class="shop-week-option">
+              <input type="checkbox" data-shop-week="${wk}" ${weeks.includes(wk) ? "checked" : ""}>
+              ${esc(WEEK_LABELS[wk])}
+            </label>
+          `).join("")}
+        </div>
       </div>
       <div class="add-item-row">
         <input type="text" id="shop-extra-input" placeholder="Legg til noe selv, f.eks. brød, melk, pålegg …">

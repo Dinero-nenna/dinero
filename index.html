@@ -334,6 +334,20 @@
   /* -- Oppskrifter tab: "Deres oppskrifter" list reuses .dish-card, stacked as real cards with gaps -- */
   .lib-list { display: flex; flex-direction: column; gap: 10px; }
 
+  /* Handleliste: "Hent ingredienser fra: [Denne uken] [Neste uke] [Uken etter]" checkboxes
+     (2026-11-22). FIX (2026-11-23, her feedback: "de tre avkrysningsboksene kommer ikke på
+     samme linje på tlf" — the label text and three options used to fight for space on one
+     flex line, so on a phone-width screen a label like "Uken etter" could wrap mid-phrase
+     across two lines, looking broken. Now the "Hent ingredienser fra:" caption always sits on
+     its own line, and each option is its own white-space:nowrap unit below it — so the three
+     options wrap as whole units (2+1 on narrow phones, all 3 side by side on wider screens)
+     instead of ever breaking a label's own text. */
+  .shop-week-picker-label { display: block; margin-bottom: 8px; }
+  .shop-week-picker-options { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+  .shop-week-option {
+    display: flex; align-items: center; gap: 5px; font-weight: normal; cursor: pointer;
+    white-space: nowrap;
+  }
   .add-item-row { display: flex; gap: 8px; margin-bottom: 14px; }
   .add-item-row input[type=text] {
     flex: 1; padding: 9px 12px; border-radius: var(--radius); border: 1px solid var(--line);
